@@ -13,6 +13,7 @@ import {
   HUB_ROOM_WIDTH_TILES,
   HUB_UI_DEPTH,
   TILE_SIZE,
+  MENU_FADE_IN_MS,
   HUB_WALKABLE_RECT
 } from '../config/constants';
 import { GameState } from '../state/GameState';
@@ -101,8 +102,19 @@ export class HubScene extends Phaser.Scene {
   
   /** Жизненный цикл Phaser: построение комнаты, игрока, NPC и обработчиков событий. */
   public create(): void {
+    console.log('[ONWAY] HubScene.create() запущен');
     this.buildRoom();
     this.spawnPlayerAndNpcs();
+
+        // При первом открытии хаба плавно убираем чёрный экран.
+    // Камера не ставится на паузу, поэтому controlsEnabled
+    // продолжает работать как раньше.
+    this.cameras.main.fadeIn(
+      MENU_FADE_IN_MS,
+      0,
+      0,
+      0,
+    );
 
     this.furniture = new HubFurniture(this, HUB_DESKS);
     this.furniture.collideWith(this.player);
