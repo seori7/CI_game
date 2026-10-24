@@ -85,21 +85,85 @@ export const COLOR_WALL = 0x1a202c;
 export const COLOR_TEXT_PRIMARY = 0xf7fafc;
 
 // ---------------------------------------------------------------------------
-// Константы мини-игры "Программист" (сортировка посылок по весу).
+// Константы мини-игры "Программист" (Code Review Sim).
 // ---------------------------------------------------------------------------
 
-/** Количество блоков-посылок для сортировки. */
-export const PROGRAMMER_BLOCK_COUNT = 5;
+/** Время на прохождение каждого из 3 уровней (в секундах). */
+export const PROGRAMMER_LEVEL_TIMES = [30, 40, 45];
 
-/** Время на выполнение мини-игры "Программист" в секундах. */
-export const PROGRAMMER_TIME_LIMIT_SECONDS = 45;
+/** Прирост стресса в секунду для каждого уровня (чем дальше, тем быстрее растёт). */
+export const PROGRAMMER_STRESS_TICKS = [1.2, 1.5, 2.0];
 
-/** Прирост стресса в секунду в мини-игре "Программист". */
-export const PROGRAMMER_STRESS_PER_SECOND = 100 / 45;
+/** Штраф стресса за клик мимо уязвимости (ошибка ревьюера). */
+export const PROGRAMMER_PENALTY_STRESS = 15;
 
-/** Допуск (в пикселях) для попадания блока в слот при drag-and-drop. */
-export const PROGRAMMER_SLOT_SNAP_TOLERANCE = 40;
+/** Геометрия макета браузера */
+export const BROWSER_WIDTH = 520;
+export const BROWSER_HEIGHT = 380;
+export const CHECKLIST_WIDTH = 280;
 
+// Цветовая палитра для макета браузера (стиль wireframe/dark-mode)
+export const COLOR_BROWSER_BG = 0x1e293b;
+export const COLOR_BROWSER_UI = 0x334155;
+export const COLOR_BUG_FOUND = 0x22c55e; // Зелёный при нахождении
+export const COLOR_BUG_HOVER = 0x475569;
+export const COLOR_TEXT_MUTED = '#94a3b8';
+export const COLOR_TEXT_DANGER = '#fca5a5';
+
+// ---------------------------------------------------------------------------
+// Константы для Меню и UX/UI Мини-игры
+// ---------------------------------------------------------------------------
+export const COLOR_UI_PRIMARY = 0x2563eb;
+export const COLOR_UI_SUCCESS = 0x16a34a;
+export const COLOR_UI_ERROR = 0xdc2626;
+
+export const UI_SLOT_WIDTH = 280;
+export const UI_SLOT_HEIGHT = 45; // Уменьшили, чтобы влезало до 6 слотов
+export const UI_SLOT_GAP = 8;
+export const UI_LEVEL_TIMES = [30, 40, 45];
+export const UI_STRESS_TICKS = [1.5, 1.8, 2.2];
+
+// ---------------------------------------------------------------------------
+// Константы мини-игры "Алгоритмика" (Робот-курьер)
+// ---------------------------------------------------------------------------
+export const DRONE_CELL_SIZE = 50;
+export const DRONE_SLOT_SIZE = 45;
+export const DRONE_LEVEL_TIMES = [30, 45, 50];
+export const DRONE_STRESS_TICKS = [1.2, 1.5, 2.0];
+
+/** Карты города (3 уровня). 0=пусто, 1=пробка, 2=Старт, 3=Финиш */
+export const DRONE_LEVEL_MAPS = [
+    {
+        grid: [
+            [1, 0, 0],
+            [2, 2, 0],
+            [0, 0, 3]
+        ],
+        maxCommands: 8, // Было слишком мало, увеличено для запаса (минимум 4)
+        timeLimit: 30
+    },
+    {
+        grid: [
+            [1, 0, 2, 0],
+            [2, 0, 0, 0],
+            [2, 2, 2, 0],
+            [0, 0, 0, 3]
+        ],
+        maxCommands: 12, // Минимум нужно 6 шагов
+        timeLimit: 45
+    },
+    {
+        grid: [
+            [1, 0, 0, 2, 0],
+            [2, 2, 0, 2, 0],
+            [0, 0, 0, 0, 0],
+            [0, 2, 2, 2, 0],
+            [0, 0, 0, 0, 3]
+        ],
+        maxCommands: 16, // Сложный уровень, даем большой запас
+        timeLimit: 60
+    }
+];
 // ---------------------------------------------------------------------------
 // Константы мини-игры "Медик" (диагностика по симптомам).
 // ---------------------------------------------------------------------------

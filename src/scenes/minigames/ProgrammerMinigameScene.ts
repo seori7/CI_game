@@ -3,10 +3,18 @@ import {
   COLOR_TEXT_PRIMARY,
   GAME_HEIGHT,
   GAME_WIDTH,
-  PROGRAMMER_BLOCK_COUNT,
-  PROGRAMMER_SLOT_SNAP_TOLERANCE,
-  PROGRAMMER_STRESS_PER_SECOND,
-  PROGRAMMER_TIME_LIMIT_SECONDS,
+  PROGRAMMER_LEVEL_TIMES,
+  PROGRAMMER_STRESS_TICKS,
+  PROGRAMMER_PENALTY_STRESS,
+  BROWSER_WIDTH,
+  BROWSER_HEIGHT,
+  CHECKLIST_WIDTH,
+  COLOR_BROWSER_BG,
+  COLOR_BROWSER_UI,
+  COLOR_BUG_FOUND,
+  COLOR_BUG_HOVER,
+  COLOR_TEXT_MUTED,
+  COLOR_TEXT_DANGER,
   STRESS_BAR_HEIGHT,
   STRESS_BAR_MAX,
   STRESS_BAR_WIDTH,
@@ -14,388 +22,458 @@ import {
 import type { MinigameResult } from '../../types/MinigameResult';
 import { GameState } from '../../state/GameState';
 
-/** Один перетаскиваемый блок-посылка с заданным весом. */
-interface ParcelBlock {
-  weight: number;
-  container: Phaser.GameObjects.Container;
-  homeX: number;
-  homeY: number;
-  slotIndex: number | null;
+/** Описание одной уязвимости на макете. */
+interface SecurityBug {
+  id: string;
+  name: string;
+  desc: string;
+  isFound: boolean;
+  rect?: Phaser.GameObjects.Rectangle; 
+  checkText?: Phaser.GameObjects.Text; 
 }
 
-/** Один слот-контейнер для посылки, отсортированный по позиции слева направо. */
-interface ParcelSlot {
-  x: number;
-  y: number;
-  occupiedByWeight: number | null;
-}
-
-/** Диапазон случайных весов посылок (в условных килограммах). */
-const MIN_PARCEL_WEIGHT = 1;
-const MAX_PARCEL_WEIGHT = 99;
-
-/** Геометрия кнопки досрочного выхода из мини-игры. */
 const EXIT_BUTTON_WIDTH = 160;
 const EXIT_BUTTON_HEIGHT = 32;
 const EXIT_BUTTON_X = 24 + EXIT_BUTTON_WIDTH / 2;
 const EXIT_BUTTON_Y = 54;
 
-/**
- * Мини-игра "Программист": нужно отсортировать 5 посылок по возрастанию
- * веса, перетаскивая блоки в слоты мышью. Таймер обратного отсчёта
- * постоянно поднимает уровень стресса, создавая игровое давление.
- *
- * Игрок может в любой момент выйти из мини-игры досрочно (клавиша Esc
- * или кнопка в углу экрана) — это эмитит 'minigame-exit' вместо
- * 'minigame-complete': результат не сохраняется, стресс не засчитывается,
- * это осознанный отказ от попытки, а не провал.
- */
 export class ProgrammerMinigameScene extends Phaser.Scene {
-  private blocks: ParcelBlock[] = [];
-  private slots: ParcelSlot[] = [];
-
+  private currentLevel = 0; // 0 = Junior, 1 = Middle, 2 = Senior
   private stressLevel = 0;
-  private attempts = 0;
-  private remainingSeconds = PROGRAMMER_TIME_LIMIT_SECONDS;
-
+  private attempts = 1;
+  private remainingSeconds = 0;
+  private foundBugsCount = 0;
+  private totalBugsInLevel = 0;
+  
+  private bugs: SecurityBug[] = [];
+  
   private stressBarFill!: Phaser.GameObjects.Rectangle;
   private timerText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
+  
+  // Контейнеры для удобной очистки при смене уровней
+  private browserContainer!: Phaser.GameObjects.Container;
+  private checklistContainer!: Phaser.GameObjects.Container;
+  
   private countdownTimer: Phaser.Time.TimerEvent | null = null;
-
-  /** Клавиша Esc для досрочного выхода из мини-игры. */
   private exitKey!: Phaser.Input.Keyboard.Key;
+  
+  private isGameOver = false;
+  private isLevelTransition = false;
 
   public constructor() {
     super('ProgrammerMinigameScene');
   }
 
-  /** Жизненный цикл Phaser: сброс состояния и построение сцены мини-игры. */
-  public create(): void {
+  // ФИКС: Добавляем прием данных, чтобы сохранять количество попыток при рестарте
+  public create(data?: { attempts?: number }): void {
+    this.currentLevel = 0;
     this.stressLevel = 0;
-    this.attempts = 0;
-    this.remainingSeconds = PROGRAMMER_TIME_LIMIT_SECONDS;
-    this.blocks = [];
-    this.slots = [];
+    this.attempts = data?.attempts || 1; // Берем переданные попытки или 1
+    this.isGameOver = false;
 
     this.buildBackground();
     this.buildHud();
     this.buildExitControl();
-    this.buildSlots();
-    this.buildBlocks();
-    this.setupDragHandlers();
-    this.startCountdown();
+    
+    this.browserContainer = this.add.container(GAME_WIDTH / 2 - 160, GAME_HEIGHT / 2);
+    this.checklistContainer = this.add.container(GAME_WIDTH - 150, GAME_HEIGHT / 2);
+
+    this.startLevel(this.currentLevel);
   }
 
-  /** Жизненный цикл Phaser: проверка нажатия Esc каждый кадр. */
   public override update(): void {
     if (Phaser.Input.Keyboard.JustDown(this.exitKey)) {
       this.exitToHub();
     }
+
+    // Эффект "выгорания": если стресс > 70%, экран начинает слегка дрожать (эффект паники)
+    if (this.stressLevel > 70 && !this.isGameOver && !this.isLevelTransition) {
+      const shakeX = Phaser.Math.Between(-2, 2);
+      const shakeY = Phaser.Math.Between(-2, 2);
+      this.browserContainer.setPosition(GAME_WIDTH / 2 - 160 + shakeX, GAME_HEIGHT / 2 + shakeY);
+    } else {
+      this.browserContainer.setPosition(GAME_WIDTH / 2 - 160, GAME_HEIGHT / 2);
+    }
   }
 
-  /** Рисует фон и заголовок мини-игры. */
+  /** Инициализация конкретного уровня. */
+  private startLevel(levelIndex: number): void {
+    this.isLevelTransition = false;
+    this.foundBugsCount = 0;
+    this.remainingSeconds = PROGRAMMER_LEVEL_TIMES[levelIndex];
+    this.bugs = [];
+    
+    // Немного "лечим" стресс между уровнями как награду
+    if (levelIndex > 0) {
+      this.stressLevel = Math.max(0, this.stressLevel - 20);
+      this.updateStressBar();
+    }
+
+    this.browserContainer.removeAll(true);
+    this.checklistContainer.removeAll(true);
+
+    this.buildBrowserWindow();
+
+    switch (levelIndex) {
+      case 0: this.buildLevel1(); break;
+      case 1: this.buildLevel2(); break;
+      case 2: this.buildLevel3(); break;
+    }
+
+    this.totalBugsInLevel = this.bugs.length;
+    this.buildChecklist();
+    
+    const titles = ['Ур 1: Форма регистрации (Junior)', 'Ур 2: Настройки профиля (Middle)', 'Ур 3: Оплата (Senior)'];
+    this.statusText.setText(titles[levelIndex]);
+
+    if (this.countdownTimer) this.countdownTimer.remove();
+    this.startCountdown();
+  }
+
+  // --- УРОВНИ ---
+
+  private buildLevel1(): void {
+    this.addMockupText(0, -140, '🌐 http://profpath.local/signup', { backgroundColor: '#334155' }, true, {
+      id: 'http', name: 'Нет HTTPS', desc: 'Данные передаются в открытом виде.'
+    });
+    this.addMockupText(0, -90, 'Создание аккаунта', { fontSize: '20px', color: '#ffffff' });
+    this.addMockupText(-50, -40, 'Имя: [ Иван ]', { color: COLOR_TEXT_MUTED });
+    
+    // Баг: Пароль в открытом виде
+    this.addMockupText(-50, 10, 'Пароль: [ 123456 ]', { color: COLOR_TEXT_DANGER }, true, {
+      id: 'pass', name: 'Слабый открытый пароль', desc: 'Пароль не скрыт и слишком прост.'
+    });
+
+    // Баг: Согласие по умолчанию
+    this.addMockupText(0, 70, '☑ Подписаться на кредиты (обязательно)', { fontSize: '12px', color: COLOR_TEXT_DANGER }, true, {
+      id: 'ux', name: 'Тёмный паттерн UX', desc: 'Скрытые платные услуги по умолчанию.'
+    });
+
+    this.addMockupText(0, 130, 'ОТПРАВИТЬ', { backgroundColor: '#2563eb', padding: {x: 30, y: 10}, color: '#fff' });
+  }
+
+  private buildLevel2(): void {
+    this.addMockupText(0, -140, '🌐 https://profpath.local/settings', { backgroundColor: '#334155' });
+    this.addMockupText(0, -90, 'Настройки приватности', { fontSize: '20px', color: '#ffffff' });
+
+    // Баг: Публичная геопозиция
+    this.addMockupText(0, -40, 'Показывать моё местоположение: [ВКЛ]', { color: COLOR_TEXT_DANGER }, true, {
+      id: 'geo', name: 'Утечка геоданных', desc: 'Геопозиция доступна всем в интернете.'
+    });
+
+    this.addMockupText(0, 10, 'Двухфакторная авторизация: [ВЫКЛ]', { color: COLOR_TEXT_MUTED });
+
+    // Баг: Токен в интерфейсе
+    this.addMockupText(0, 60, 'Ваш API токен: eyJhbGciOiJIUzI1Ni...', { fontSize: '12px', color: COLOR_TEXT_DANGER }, true, {
+      id: 'token', name: 'Скомпрометирован токен', desc: 'Токен доступа выведен на экран.'
+    });
+
+    // Баг: Скрытая кнопка удаления
+    this.addMockupText(180, 150, 'удалить аккаунт', { fontSize: '8px', color: '#334155' }, true, { // Цвет сливается с фоном
+      id: 'del', name: 'Невозможно удалить аккаунт', desc: 'Кнопка намеренно спрятана от юзера.'
+    });
+  }
+
+  private buildLevel3(): void {
+    this.addMockupText(0, -140, '🌐 http://profpath.local/checkout?debug=true', { backgroundColor: '#334155' }, true, {
+      id: 'debug', name: 'Оставлен Debug Mode', desc: 'Режим отладки открыт на проде + HTTP.'
+    });
+    this.addMockupText(0, -90, 'Оплата заказа', { fontSize: '20px', color: '#ffffff' });
+
+    // Баг: редактируемая цена
+    this.addMockupText(-50, -30, 'К оплате: <input value="999.00"> $', { color: COLOR_TEXT_DANGER }, true, {
+      id: 'price', name: 'Подмена цены (Client-side)', desc: 'Цена меняется на стороне клиента.'
+    });
+
+    this.addMockupText(-50, 20, 'Карта: 4276 1111 2222 3333', { color: COLOR_TEXT_DANGER }, true, {
+      id: 'card', name: 'Данные карты не замаскированы', desc: 'Полный номер карты на экране.'
+    });
+
+    this.addMockupText(-50, 60, 'CVV: [ 123 ]  ☑ Сохранить CVV', { fontSize: '14px', color: COLOR_TEXT_DANGER }, true, {
+      id: 'cvv', name: 'Сохранение CVV', desc: 'По стандартам PCI DSS хранить CVV запрещено!'
+    });
+
+    this.addMockupText(0, 130, 'ОПЛАТИТЬ', { backgroundColor: '#16a34a', padding: {x: 40, y: 10}, color: '#fff' });
+  }
+
+  // --- ЯДРО ИНТЕРФЕЙСА ---
+
+  /** Базовая рамка окна браузера */
+  private buildBrowserWindow(): void {
+    const bg = this.add.rectangle(0, 0, BROWSER_WIDTH, BROWSER_HEIGHT, COLOR_BROWSER_BG).setStrokeStyle(2, COLOR_BROWSER_UI);
+    bg.setInteractive();
+    bg.on('pointerdown', () => this.handleMissClick()); // Клик по фону = ошибка
+    this.browserContainer.add(bg);
+
+    const header = this.add.rectangle(0, -BROWSER_HEIGHT/2 + 15, BROWSER_WIDTH, 30, COLOR_BROWSER_UI);
+    const btn1 = this.add.circle(-BROWSER_WIDTH/2 + 20, -BROWSER_HEIGHT/2 + 15, 6, 0xef4444);
+    const btn2 = this.add.circle(-BROWSER_WIDTH/2 + 40, -BROWSER_HEIGHT/2 + 15, 6, 0xeab308);
+    const btn3 = this.add.circle(-BROWSER_WIDTH/2 + 60, -BROWSER_HEIGHT/2 + 15, 6, 0x22c55e);
+    this.browserContainer.add([header, btn1, btn2, btn3]);
+  }
+
+  /** Универсальный метод создания текста (как уязвимости, так и обычного) */
+  private addMockupText(x: number, y: number, textStr: string, style: any, isBug = false, bugData?: Partial<SecurityBug>): void {
+    const text = this.add.text(x, y, textStr, { fontFamily: 'monospace', fontSize: '16px', ...style }).setOrigin(0.5, 0.5);
+    this.browserContainer.add(text);
+
+    if (isBug && bugData) {
+      const bounds = text.getBounds();
+      // Создаем прозрачный хитбокс чуть больше текста
+      const hitRect = this.add.rectangle(x, y, bounds.width + 20, bounds.height + 10, COLOR_BUG_HOVER, 0)
+        .setStrokeStyle(2, COLOR_BUG_FOUND, 0);
+      
+      const bug: SecurityBug = { ...bugData, isFound: false } as SecurityBug;
+      bug.rect = hitRect;
+      this.bugs.push(bug);
+
+      hitRect.setInteractive({ useHandCursor: true });
+      hitRect.on('pointerover', () => { if (!bug.isFound && !this.isGameOver) hitRect.setFillStyle(COLOR_BUG_HOVER, 0.4); });
+      hitRect.on('pointerout', () => { if (!bug.isFound) hitRect.setFillStyle(COLOR_BUG_HOVER, 0); });
+      hitRect.on('pointerdown', (p: any, lx: any, ly: any, event: any) => {
+        event.stopPropagation(); // Не пропускаем клик к фону браузера (чтобы не было штрафа)
+        this.handleBugFound(bug);
+      });
+      
+      this.browserContainer.add(hitRect);
+    }
+  }
+
+  private buildChecklist(): void {
+    const bg = this.add.rectangle(0, 0, CHECKLIST_WIDTH, BROWSER_HEIGHT, 0x1e293b).setStrokeStyle(1, 0x475569);
+    const title = this.add.text(0, -BROWSER_HEIGHT/2 + 20, 'ЧЕК-ЛИСТ РЕВЬЮЕРА', { fontFamily: 'monospace', fontSize: '16px', color: '#fbbf24' }).setOrigin(0.5, 0.5);
+    this.checklistContainer.add([bg, title]);
+
+    this.bugs.forEach((bug, index) => {
+      const text = this.add.text(-CHECKLIST_WIDTH/2 + 15, -BROWSER_HEIGHT/2 + 60 + index * 55, `[ ] ${bug.name}`, { 
+        fontFamily: 'monospace', fontSize: '13px', color: COLOR_TEXT_MUTED, wordWrap: { width: CHECKLIST_WIDTH - 30 }
+      });
+      bug.checkText = text;
+      this.checklistContainer.add(text);
+    });
+  }
+
+  // --- ИГРОВАЯ ЛОГИКА ---
+
+  private handleBugFound(bug: SecurityBug): void {
+    if (bug.isFound || this.isGameOver || this.isLevelTransition) return;
+    
+    bug.isFound = true;
+    this.foundBugsCount++;
+
+    if (this.cache.audio.exists('snd_success')) this.sound.play('snd_success', { volume: 0.5 });
+
+    bug.rect?.setFillStyle(COLOR_BUG_FOUND, 0.3).setStrokeStyle(2, COLOR_BUG_FOUND, 1);
+    if (bug.rect) {
+      this.tweens.add({ targets: bug.rect, scaleX: 1.05, scaleY: 1.1, yoyo: true, duration: 150 });
+    }
+
+    bug.checkText?.setText(`[X] ${bug.name}\n    ${bug.desc}`);
+    bug.checkText?.setColor('#22c55e');
+
+    // Координаты для всплывающего текста нужно считать глобально
+    const globalX = GAME_WIDTH / 2 - 160 + bug.rect!.x;
+    const globalY = GAME_HEIGHT / 2 + bug.rect!.y;
+    this.showFloatingText(globalX, globalY, '+ Уязвимость!', '#22c55e');
+
+    if (this.foundBugsCount >= this.totalBugsInLevel) {
+      this.handleLevelComplete();
+    }
+  }
+
+  private handleMissClick(): void {
+    if (this.isGameOver || this.isLevelTransition) return;
+
+    if (this.cache.audio.exists('snd_error')) this.sound.play('snd_error', { volume: 0.4 });
+    
+    this.stressLevel = Math.min(STRESS_BAR_MAX, this.stressLevel + PROGRAMMER_PENALTY_STRESS);
+    this.updateStressBar();
+    this.showFloatingText(this.input.activePointer.x, this.input.activePointer.y, '- Нервы (Ошибся)', '#ef4444');
+    this.cameras.main.shake(150, 0.005);
+
+    if (this.stressLevel >= STRESS_BAR_MAX) {
+      this.handleGameFail();
+    }
+  }
+
+  private showFloatingText(x: number, y: number, message: string, color: string): void {
+    const floatText = this.add.text(x, y, message, { fontFamily: 'monospace', fontSize: '16px', color, fontStyle: 'bold' }).setOrigin(0.5, 0.5);
+    this.tweens.add({ targets: floatText, y: y - 40, alpha: 0, duration: 800, onComplete: () => floatText.destroy() });
+  }
+
+  private handleLevelComplete(): void {
+    this.isLevelTransition = true;
+    this.countdownTimer?.remove();
+
+    if (this.currentLevel >= 2) {
+      this.showFinalResults();
+    } else {
+      this.statusText.setText('Отличная работа! Переходим к следующей задаче...');
+      this.cameras.main.flash(500, 34, 197, 94); // Зеленая вспышка экрана
+      this.time.delayedCall(2000, () => {
+        this.currentLevel++;
+        this.startLevel(this.currentLevel);
+      });
+    }
+  }
+
+  // --- ОБРАБОТКА ПРОИГРЫША ---
+
+  private handleGameFail(): void {
+    this.isGameOver = true;
+    this.countdownTimer?.remove();
+    this.statusText.setText('Выгорел! Баги попали в прод.');
+    
+    // Тряска при провале
+    this.cameras.main.shake(500, 0.01);
+    
+    // Через 1 секунду показываем окно проигрыша
+    this.time.delayedCall(1000, () => {
+      this.showGameOverScreen();
+    });
+  }
+
+  private showGameOverScreen(): void {
+    // ФИКС: setInteractive() делает фон невосприимчивым к кликам "насквозь", блокируя интерфейс позади
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.85).setOrigin(0, 0).setDepth(200).setInteractive();
+
+    const panelY = GAME_HEIGHT / 2;
+
+    this.add.text(GAME_WIDTH / 2, panelY - 60, 'СИСТЕМНЫЙ СБОЙ', { fontFamily: 'monospace', fontSize: '32px', color: '#ef4444', fontStyle: 'bold' }).setOrigin(0.5, 0.5).setDepth(201);
+    this.add.text(GAME_WIDTH / 2, panelY - 20, 'Стресс достиг предела. Критические баги ушли в прод.', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' }).setOrigin(0.5, 0.5).setDepth(201);
+
+    // Кнопка "Заново"
+    const retryBtn = this.add.rectangle(GAME_WIDTH / 2 - 120, panelY + 60, 200, 44, 0x2563eb).setDepth(201).setInteractive({ useHandCursor: true });
+    this.add.text(GAME_WIDTH / 2 - 120, panelY + 60, 'Пройти заново', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 0.5).setDepth(202);
+
+    retryBtn.on('pointerover', () => retryBtn.setFillStyle(0x1d4ed8));
+    retryBtn.on('pointerout', () => retryBtn.setFillStyle(0x2563eb));
+    retryBtn.once('pointerdown', () => {
+      // ФИКС: Используем встроенный рестарт сцены с передачей попыток + микрозадержка
+      this.time.delayedCall(50, () => {
+        this.scene.restart({ attempts: this.attempts + 1 });
+      });
+    });
+
+    // Кнопка "Выйти"
+    const exitBtn = this.add.rectangle(GAME_WIDTH / 2 + 120, panelY + 60, 200, 44, 0x374151).setDepth(201).setInteractive({ useHandCursor: true }).setStrokeStyle(1, 0x9ca3af);
+    this.add.text(GAME_WIDTH / 2 + 120, panelY + 60, 'Выйти в хаб', { fontFamily: 'monospace', fontSize: '16px', color: '#e5e7eb' }).setOrigin(0.5, 0.5).setDepth(202);
+
+    exitBtn.on('pointerover', () => exitBtn.setFillStyle(0x4b5563));
+    exitBtn.on('pointerout', () => exitBtn.setFillStyle(0x374151));
+    exitBtn.once('pointerdown', () => {
+      // ФИКС: Микрозадержка
+      this.time.delayedCall(50, () => {
+        this.exitToHub();
+      });
+    });
+  }
+
+  // --- ИНТЕРФЕЙС И ТАЙМЕРЫ ---
+
   private buildBackground(): void {
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x111827).setOrigin(0, 0);
-    this.add
-      .text(GAME_WIDTH / 2, 28, 'Отсортируй посылки по весу (от лёгкой к тяжёлой)', {
-        fontFamily: 'monospace',
-        fontSize: '18px',
-        color: `#${COLOR_TEXT_PRIMARY.toString(16)}`,
-      })
-      .setOrigin(0.5, 0.5);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x0f172a).setOrigin(0, 0);
+    this.add.text(GAME_WIDTH / 2, 28, 'CODE REVIEW SIMULATOR', { fontFamily: 'monospace', fontSize: '20px', color: `#${COLOR_TEXT_PRIMARY.toString(16)}`, fontStyle: 'bold' }).setOrigin(0.5, 0.5);
   }
 
-  /** Создаёт HUD: полоску стресса и таймер. */
   private buildHud(): void {
     const barX = GAME_WIDTH - STRESS_BAR_WIDTH - 24;
     const barY = 20;
 
-    this.add.text(barX, barY - 18, 'Стресс', {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: '#f87171',
-    });
-    this.add
-      .rectangle(barX, barY, STRESS_BAR_WIDTH, STRESS_BAR_HEIGHT, 0x374151)
-      .setOrigin(0, 0)
-      .setStrokeStyle(1, 0x6b7280);
-    this.stressBarFill = this.add
-      .rectangle(barX, barY, 0, STRESS_BAR_HEIGHT, 0xf87171)
-      .setOrigin(0, 0);
+    this.add.text(barX, barY - 18, 'Уровень выгорания', { fontFamily: 'monospace', fontSize: '12px', color: '#f87171' });
+    this.add.rectangle(barX, barY, STRESS_BAR_WIDTH, STRESS_BAR_HEIGHT, 0x374151).setOrigin(0, 0).setStrokeStyle(1, 0x6b7280);
+    this.stressBarFill = this.add.rectangle(barX, barY, 0, STRESS_BAR_HEIGHT, 0xf87171).setOrigin(0, 0);
 
-    this.timerText = this.add.text(24, 20, '', {
-      fontFamily: 'monospace',
-      fontSize: '16px',
-      color: `#${COLOR_TEXT_PRIMARY.toString(16)}`,
-    });
-
-    this.statusText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 30, '', {
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        color: '#fbbf24',
-      })
-      .setOrigin(0.5, 0.5);
-
-    this.updateTimerText();
+    this.timerText = this.add.text(24, 20, '', { fontFamily: 'monospace', fontSize: '16px', color: `#${COLOR_TEXT_PRIMARY.toString(16)}` });
+    this.statusText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 25, '', { fontFamily: 'monospace', fontSize: '16px', color: '#fbbf24' }).setOrigin(0.5, 0.5);
   }
 
-  /**
-   * Создаёт клавишу Esc и видимую кнопку "Выйти" в углу экрана — игрок
-   * может прервать мини-игру в любой момент без штрафа.
-   */
   private buildExitControl(): void {
     this.exitKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-
-    const rect = this.add
-      .rectangle(EXIT_BUTTON_X, EXIT_BUTTON_Y, EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT, 0x374151)
-      .setStrokeStyle(1, 0x9ca3af);
-    const text = this.add
-      .text(EXIT_BUTTON_X, EXIT_BUTTON_Y, 'Esc — выйти в хаб', {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#e5e7eb',
-      })
-      .setOrigin(0.5, 0.5);
-
-    rect.setInteractive({ useHandCursor: true });
-    rect.on('pointerover', () => rect.setFillStyle(0x4b5563));
-    rect.on('pointerout', () => rect.setFillStyle(0x374151));
-    rect.on('pointerdown', () => this.exitToHub());
-    // Текст кнопки статичен и не требует обновления — хранить ссылку не нужно.
-    void text;
+    const rect = this.add.rectangle(EXIT_BUTTON_X, EXIT_BUTTON_Y + 10, EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT, 0x374151).setStrokeStyle(1, 0x9ca3af);
+    this.add.text(EXIT_BUTTON_X, EXIT_BUTTON_Y + 10, 'Esc — сдаться', { fontFamily: 'monospace', fontSize: '12px', color: '#e5e7eb' }).setOrigin(0.5, 0.5);
+    rect.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.exitToHub());
   }
 
-  /**
-   * Прерывает мини-игру по желанию игрока: без результата и без штрафа
-   * стресса (это отказ от попытки, а не провал).
-   */
   private exitToHub(): void {
     this.countdownTimer?.remove();
     this.game.events.emit('minigame-exit');
     this.scene.stop();
   }
 
-  /** Создаёт 5 пустых слотов-контейнеров, в которые нужно разложить блоки по порядку. */
-  private buildSlots(): void {
-    const slotWidth = 110;
-    const totalWidth = slotWidth * PROGRAMMER_BLOCK_COUNT;
-    const startX = (GAME_WIDTH - totalWidth) / 2 + slotWidth / 2;
-    const slotY = GAME_HEIGHT - 120;
-
-    for (let i = 0; i < PROGRAMMER_BLOCK_COUNT; i += 1) {
-      const x = startX + i * slotWidth;
-      this.add
-        .rectangle(x, slotY, slotWidth - 12, 70, 0x1f2937)
-        .setStrokeStyle(2, 0x4b5563, 1);
-      this.add
-        .text(x, slotY + 46, `#${i + 1}`, {
-          fontFamily: 'monospace',
-          fontSize: '12px',
-          color: '#6b7280',
-        })
-        .setOrigin(0.5, 0.5);
-      this.slots.push({ x, y: slotY, occupiedByWeight: null });
-    }
-  }
-
-  /** Генерирует 5 блоков со случайными уникальными весами и расставляет их сверху вразнобой. */
-  private buildBlocks(): void {
-    const weights = this.generateUniqueWeights(PROGRAMMER_BLOCK_COUNT);
-    const shuffledPositions = Phaser.Utils.Array.Shuffle([0, 1, 2, 3, 4]);
-    const blockWidth = 110;
-    const totalWidth = blockWidth * PROGRAMMER_BLOCK_COUNT;
-    const startX = (GAME_WIDTH - totalWidth) / 2 + blockWidth / 2;
-    const blockY = GAME_HEIGHT / 2 - 40;
-
-    weights.forEach((weight, index) => {
-      const slot = shuffledPositions[index];
-      const x = startX + slot * blockWidth;
-
-      const rect = this.add.rectangle(0, 0, blockWidth - 16, 70, 0x2563eb).setStrokeStyle(2, 0xbfdbfe);
-      const label = this.add
-        .text(0, 0, `${weight} кг`, {
-          fontFamily: 'monospace',
-          fontSize: '16px',
-          color: '#ffffff',
-        })
-        .setOrigin(0.5, 0.5);
-
-      const container = this.add.container(x, blockY, [rect, label]);
-      container.setSize(blockWidth - 16, 70);
-      container.setInteractive({ draggable: true, useHandCursor: true });
-      this.input.setDraggable(container);
-
-      this.blocks.push({ weight, container, homeX: x, homeY: blockY, slotIndex: null });
-    });
-  }
-
-  /** Генерирует массив из `count` уникальных случайных весов. */
-  private generateUniqueWeights(count: number): number[] {
-    const weights = new Set<number>();
-    while (weights.size < count) {
-      weights.add(Phaser.Math.Between(MIN_PARCEL_WEIGHT, MAX_PARCEL_WEIGHT));
-    }
-    return Array.from(weights);
-  }
-
-  /** Подключает обработку drag/dragend для всех блоков. */
-  private setupDragHandlers(): void {
-    this.input.on(
-      'drag',
-      (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Container, dragX: number, dragY: number) => {
-        gameObject.x = dragX;
-        gameObject.y = dragY;
-      },
-    );
-
-    this.input.on('dragend', (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Container) => {
-      this.handleBlockDropped(gameObject);
-    });
-  }
-
-  /**
-   * Обрабатывает окончание перетаскивания блока: ищет ближайший свободный
-   * слот в пределах допуска PROGRAMMER_SLOT_SNAP_TOLERANCE; если найден —
-   * "прилипает" к нему, иначе возвращает блок на исходную позицию.
-   * @param container контейнер перетаскиваемого блока
-   */
-  private handleBlockDropped(container: Phaser.GameObjects.Container): void {
-    const block = this.blocks.find((b) => b.container === container);
-    if (block === undefined) {
-      return;
-    }
-
-    if (block.slotIndex !== null) {
-      this.slots[block.slotIndex].occupiedByWeight = null;
-      block.slotIndex = null;
-    }
-
-    const targetSlot = this.findNearestFreeSlot(container.x, container.y);
-    if (targetSlot !== null) {
-      container.setPosition(targetSlot.x, targetSlot.y);
-      targetSlot.occupiedByWeight = block.weight;
-      block.slotIndex = this.slots.indexOf(targetSlot);
-    } else {
-      container.setPosition(block.homeX, block.homeY);
-    }
-
-    this.checkCompletion();
-  }
-
-  /**
-   * Находит ближайший свободный слот в пределах допуска по расстоянию.
-   * @param x координата X точки сброса
-   * @param y координата Y точки сброса
-   */
-  private findNearestFreeSlot(x: number, y: number): ParcelSlot | null {
-    let closest: ParcelSlot | null = null;
-    let closestDistance = Number.POSITIVE_INFINITY;
-
-    for (const slot of this.slots) {
-      if (slot.occupiedByWeight !== null) {
-        continue;
-      }
-      const distance = Phaser.Math.Distance.Between(x, y, slot.x, slot.y);
-      if (distance <= PROGRAMMER_SLOT_SNAP_TOLERANCE && distance < closestDistance) {
-        closest = slot;
-        closestDistance = distance;
-      }
-    }
-
-    return closest;
-  }
-
-  /** Проверяет, заполнены ли все слоты и расставлены ли посылки по возрастанию веса. */
-  private checkCompletion(): void {
-    const allFilled = this.slots.every((slot) => slot.occupiedByWeight !== null);
-    if (!allFilled) {
-      return;
-    }
-
-    this.attempts += 1;
-    const weightsInOrder = this.slots.map((slot) => slot.occupiedByWeight as number);
-    const isSorted = weightsInOrder.every(
-      (weight, index) => index === 0 || weightsInOrder[index - 1] <= weight,
-    );
-
-    if (isSorted) {
-      this.finishMinigame();
-    } else {
-      this.statusText.setText('Порядок неверный — попробуй ещё раз!');
-      this.time.delayedCall(1000, () => this.statusText.setText(''));
-    }
-  }
-
-  /** Запускает таймер обратного отсчёта, повышающий уровень стресса каждую секунду. */
   private startCountdown(): void {
+    const tickRate = PROGRAMMER_STRESS_TICKS[this.currentLevel];
     this.countdownTimer = this.time.addEvent({
-      delay: 1000,
-      loop: true,
+      delay: 1000, loop: true,
       callback: () => {
+        if (this.isGameOver || this.isLevelTransition) return;
+
         this.remainingSeconds -= 1;
-        this.stressLevel = Math.min(
-          STRESS_BAR_MAX,
-          this.stressLevel + PROGRAMMER_STRESS_PER_SECOND,
-        );
+        this.stressLevel = Math.min(STRESS_BAR_MAX, this.stressLevel + tickRate);
+        
         this.updateTimerText();
         this.updateStressBar();
 
-        if (this.remainingSeconds <= 0) {
-          this.handleTimeOut();
+        if (this.remainingSeconds <= 0 || this.stressLevel >= STRESS_BAR_MAX) {
+          this.handleGameFail();
         }
       },
     });
   }
 
-  /** Обновляет текст таймера на экране. */
   private updateTimerText(): void {
-    this.timerText.setText(`Время: ${Math.max(0, this.remainingSeconds)} с`);
+    this.timerText.setText(`Дедлайн: ${Math.max(0, this.remainingSeconds)} с`);
   }
 
-  /** Обновляет визуальную ширину полоски стресса согласно текущему значению. */
   private updateStressBar(): void {
-    const ratio = this.stressLevel / STRESS_BAR_MAX;
-    this.stressBarFill.width = STRESS_BAR_WIDTH * ratio;
+    this.stressBarFill.width = STRESS_BAR_WIDTH * (this.stressLevel / STRESS_BAR_MAX);
+    // Меняем цвет полоски при высоком стрессе
+    if (this.stressLevel > 70) this.stressBarFill.setFillStyle(0xdc2626); // Ярко красный
+    else this.stressBarFill.setFillStyle(0xf87171); // Обычный красный
   }
 
-  /** Обрабатывает истечение времени: сбрасывает раскладку блоков и перезапускает таймер. */
-  private handleTimeOut(): void {
-    this.attempts += 1;
-    this.statusText.setText('Время вышло! Начинаем раскладку заново.');
-    this.time.delayedCall(1000, () => this.statusText.setText(''));
+  // --- ФИНАЛ ---
 
-    for (const block of this.blocks) {
-      block.slotIndex = null;
-      block.container.setPosition(block.homeX, block.homeY);
-    }
-    for (const slot of this.slots) {
-      slot.occupiedByWeight = null;
-    }
-    this.remainingSeconds = PROGRAMMER_TIME_LIMIT_SECONDS;
-  }
+  private showFinalResults(): void {
+    this.isGameOver = true;
+    
+    // ФИКС: Делаем фон интерактивным
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.85).setOrigin(0, 0).setDepth(200).setInteractive();
 
-  /** Завершает мини-игру: считает счёт, формирует результат и возвращает игрока в хаб. */
-  private finishMinigame(): void {
-    this.countdownTimer?.remove();
+    const resultPanelY = GAME_HEIGHT / 2;
+    const finalStress = Math.round(this.stressLevel);
+    
+    let feedback = '';
+    if (finalStress < 40) feedback = '🛡️ Безопасник уровня Senior! Прибавка к ЗП!';
+    else if (finalStress < 80) feedback = '😅 Код чист, но глаз дёргается. (Middle)';
+    else feedback = '😱 Junior спас релиз ценой своих нервов!';
 
-    const score = Math.round(
-      (this.remainingSeconds / PROGRAMMER_TIME_LIMIT_SECONDS) * 1000 - this.attempts * 20,
-    );
+    // Счёт: база + бонус за низкий стресс - штраф за попытки
+    const finalScore = Math.max(0, 1000 + (100 - finalStress) * 10 - (this.attempts - 1) * 200);
 
-    const result: MinigameResult = {
-      minigameType: 'programmer',
-      score: Math.max(0, score),
-      attempts: this.attempts,
-      stressLevel: Math.round(this.stressLevel),
-      difficulty: GameState.getInstance().getProgress().currentChapter > 2 ? 'hard' : 'easy',
-    };
+    this.add.text(GAME_WIDTH / 2, resultPanelY - 80, 'СИСТЕМА БЕЗОПАСНА!', { fontFamily: 'monospace', fontSize: '32px', color: '#4ade80' }).setOrigin(0.5, 0.5).setDepth(201);
+    this.add.text(GAME_WIDTH / 2, resultPanelY - 20, feedback, { fontFamily: 'monospace', fontSize: '20px', color: '#ffffff' }).setOrigin(0.5, 0.5).setDepth(201);
+    this.add.text(GAME_WIDTH / 2, resultPanelY + 20, `Счёт: ${finalScore} | Попыток: ${this.attempts}`, { fontFamily: 'monospace', fontSize: '16px', color: '#9ca3af' }).setOrigin(0.5, 0.5).setDepth(201);
 
-    this.statusText.setText('Готово! Возвращаемся в хаб...');
-    this.time.delayedCall(1000, () => {
-      this.game.events.emit('minigame-complete', result);
-      this.scene.stop();
+    const btnRect = this.add.rectangle(GAME_WIDTH / 2, resultPanelY + 90, 220, 44, 0x2563eb).setDepth(201).setInteractive({ useHandCursor: true });
+    this.add.text(GAME_WIDTH / 2, resultPanelY + 90, 'Вернуться в хаб', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 0.5).setDepth(202);
+
+    btnRect.on('pointerover', () => btnRect.setFillStyle(0x1d4ed8));
+    btnRect.on('pointerout', () => btnRect.setFillStyle(0x2563eb));
+    btnRect.once('pointerdown', () => {
+      // ФИКС: Микрозадержка для безопасной отработки клика
+      this.time.delayedCall(50, () => {
+        const result: MinigameResult = {
+          minigameType: 'programmer', 
+          score: finalScore,
+          attempts: this.attempts,
+          stressLevel: finalStress,
+          difficulty: 'hard', 
+        };
+        this.game.events.emit('minigame-complete', result);
+        this.scene.stop();
+      });
     });
   }
 }
