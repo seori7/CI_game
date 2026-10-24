@@ -4,6 +4,12 @@ import {
   INTERACTION_RADIUS,
   NPC_DISABLED_ALPHA,
   CHARACTER_DISPLAY_SCALE,
+  CHARACTER_SPRITE_HEIGHT,
+  CHARACTER_NAME_GAP_PX,
+  CHARACTER_NAME_FONT_SIZE_PX,
+  CHARACTER_NAME_BACKGROUND,
+  CHARACTER_NAME_PADDING_X,
+  CHARACTER_NAME_PADDING_Y,
 } from '../config/constants';
 import { ASSET_MANIFEST, type AssetManifestKey } from '../config/assetManifest';
 import type { Player } from './Player';
@@ -85,24 +91,52 @@ export class NPC extends Phaser.GameObjects.Container {
       rect.setStrokeStyle(2, 0xffffff, 0.5);
       bodyVisual = rect;
     }
-    const nameLabel = scene.add.text(0, 0, descriptor.label, {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: `#${COLOR_TEXT_PRIMARY.toString(16)}`,
-    });
-    nameLabel.setOrigin(0.5, 0.5);
-    nameLabel.setY(-descriptor.height / 2 - 10);
+// Реальная верхняя граница PNG с учётом масштаба.
+// Контейнер остаётся привязанным к существующему физическому телу.
+const spriteTopY = hasRealSprite
+  ? descriptor.height / 2 -
+    CHARACTER_SPRITE_HEIGHT * CHARACTER_DISPLAY_SCALE
+  : -descriptor.height / 2;
 
-    this.promptText = scene.add.text(0, 0, 'Нажать E', {
+// Имя располагается над головой, а не поверх лица.
+const nameLabel = scene.add.text(
+  0,
+  spriteTopY - CHARACTER_NAME_GAP_PX,
+  descriptor.label,
+  {
+    fontFamily: 'monospace',
+    fontSize: `${CHARACTER_NAME_FONT_SIZE_PX}px`,
+    color: `#${COLOR_TEXT_PRIMARY.toString(16)}`,
+    backgroundColor: CHARACTER_NAME_BACKGROUND,
+    padding: {
+      x: CHARACTER_NAME_PADDING_X,
+      y: CHARACTER_NAME_PADDING_Y,
+    },
+  },
+);
+
+  nameLabel.setOrigin(0.5, 1);
+
+  // Подсказку взаимодействия ставим выше имени,
+  // используя фактическую высоту текста.
+  this.promptText = scene.add.text(
+    0,
+    nameLabel.y - nameLabel.height - CHARACTER_NAME_GAP_PX,
+    'Нажать E',
+    {
       fontFamily: 'monospace',
-      fontSize: '13px',
+      fontSize: `${CHARACTER_NAME_FONT_SIZE_PX}px`,
       color: '#fde68a',
-      backgroundColor: '#00000099',
-      padding: { x: 4, y: 2 },
-    });
-    this.promptText.setOrigin(0.5, 0.5);
-    this.promptText.setY(-descriptor.height / 2 - 28);
-    this.promptText.setVisible(false);
+      backgroundColor: CHARACTER_NAME_BACKGROUND,
+      padding: {
+        x: CHARACTER_NAME_PADDING_X,
+        y: CHARACTER_NAME_PADDING_Y,
+      },
+    },
+  );
+
+  this.promptText.setOrigin(0.5, 1);
+  this.promptText.setVisible(false);
 
     this.add([bodyVisual, nameLabel, this.promptText]);
     this.setSize(descriptor.width, descriptor.height);

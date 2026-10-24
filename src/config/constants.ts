@@ -109,6 +109,64 @@ export const CHARACTER_SPRITE_HEIGHT = 48;
  * в режиме pixelArt: true (без сглаживания при масштабировании).
  */
 export const CHARACTER_DISPLAY_SCALE = 2;
+// ---------------------------------------------------------------------------
+// Анимация персонажа.
+// ---------------------------------------------------------------------------
+
+/**
+ * Количество кадров ходьбы в каждом направлении.
+ * Художник подготовил четыре последовательных кадра.
+ */
+export const PLAYER_WALK_FRAMES = 4;
+
+/**
+ * Частота воспроизведения анимации ходьбы.
+ * 8 кадров в секунду дают плавную, но сохраняющую пиксельный стиль походку.
+ */
+export const PLAYER_WALK_FRAME_RATE = 8;
+
+/**
+ * Индексы первых кадров каждого направления в спрайтлисте.
+ * Спрайтлист содержит четыре строки по четыре кадра.
+ */
+export const PLAYER_ANIMATION_FRAMES = {
+  down: 0,
+  left: 4,
+  right: 8,
+  up: 12,
+} as const;
+
+/**
+ * Названия анимаций Phaser.
+ * Отдельные ключи исключают конфликты с анимациями NPC.
+ */
+export const PLAYER_ANIMATION_KEYS = {
+  down: 'player-walk-down',
+  left: 'player-walk-left',
+  right: 'player-walk-right',
+  up: 'player-walk-up',
+} as const;
+
+/**
+ * Расстояние между верхним краем изображения персонажа
+ * и нижним краем подписи с его именем.
+ */
+export const CHARACTER_NAME_GAP_PX = 8;
+
+/** Размер текста имени персонажа. */
+export const CHARACTER_NAME_FONT_SIZE_PX = 14;
+
+/**
+ * Цвет подложки имени.
+ * Полупрозрачный фон помогает читать надпись на пёстром фоне хаба.
+ */
+export const CHARACTER_NAME_BACKGROUND = '#00000099';
+
+/** Горизонтальный отступ текста внутри подложки. */
+export const CHARACTER_NAME_PADDING_X = 5;
+
+/** Вертикальный отступ текста внутри подложки. */
+export const CHARACTER_NAME_PADDING_Y = 2;
 
 /** Цвет пола комнаты-хаба. */
 export const COLOR_FLOOR = 0x2d3748;
@@ -316,7 +374,7 @@ export const HUB_DESK_FOOTPRINT_HEIGHT_PX = 16;
  */
 export const HUB_DESKS: HubDeskLayout[] = [
   // Учительский стол у доски.
-  { x: 349, y: 159, width: 184, height: 85, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 349, y: 159, width: 184, height: 80, footprintHeight:30 },
 
   // Ряд 1 (y = 260).
   { x: 223, y: 260, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
@@ -399,4 +457,26 @@ export const HUB_WALKABLE_RECT = {
   top: 145,
   right: 800,
   bottom: 460,
+};
+
+// ---------------------------------------------------------------------------
+// Надписи над персонажами хаба (имя и подсказка "Нажать E").
+// ---------------------------------------------------------------------------
+
+/** Зазор (px) между верхом спрайта персонажа и нижним краем надписи с именем. */
+export const CHARACTER_LABEL_GAP_PX = 6;
+
+/** Зазор (px) между надписью с именем и подсказкой "Нажать E" над ней. */
+export const CHARACTER_PROMPT_GAP_PX = 18;
+
+/**
+ * Ручная подстройка высоты надписи конкретного персонажа (px).
+ * Положительное значение опускает надпись, отрицательное поднимает.
+ * Ключ — id из ASSET_MANIFEST (player, npc_max, npc_nastya, npc_lena).
+ */
+export const CHARACTER_LABEL_EXTRA_OFFSET_Y: Partial<Record<string, number>> = {
+  player: 8,
+  npc_max: 8,
+  npc_nastya: 0,
+  npc_lena: 8,
 };

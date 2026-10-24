@@ -40,13 +40,13 @@ export interface PlaceholderVisualDescriptor {
  * хардкодить цвета/размеры у себя.
  */
 export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
-  player: {
+    player: {
     id: 'player',
     color: COLOR_PLAYER,
     width: 28,
     height: 36,
     label: 'ТЫ',
-    spriteSheetPath: 'assets/characters/player.png',
+    spriteSheetPath: 'assets/characters/player_walk.png',
     frameWidth: 32,
     frameHeight: 48,
   },
@@ -63,7 +63,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     color: COLOR_NPC_NASTYA,
     width: 30,
     height: 38,
-    label: 'Рома',
+    label: 'Влад',
     spriteSheetPath: 'assets/characters/npc_builder.png',
   },
   npc_lena: {
