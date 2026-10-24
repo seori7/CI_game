@@ -46,7 +46,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     width: 28,
     height: 36,
     label: 'ТЫ',
-    spriteSheetPath: null,
+    spriteSheetPath: 'assets/characters/player.png',
     frameWidth: 32,
     frameHeight: 48,
   },
@@ -56,7 +56,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     width: 30,
     height: 38,
     label: 'Мася',
-    spriteSheetPath: null,
+    spriteSheetPath: 'assets/characters/npc_programmer.png',
   },
   npc_nastya: {
     id: 'npc_nastya',
@@ -64,7 +64,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     width: 30,
     height: 38,
     label: 'Рома',
-    spriteSheetPath: null,
+    spriteSheetPath: 'assets/characters/npc_builder.png',
   },
   npc_lena: {
     id: 'npc_lena',
@@ -72,9 +72,11 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     width: 30,
     height: 38,
     label: 'Юни',
-    spriteSheetPath: null,
+    spriteSheetPath: 'assets/characters/npc_medic.png',
   },
 };
 
+/** Путь к фоновому изображению хаба. null = рисуем Graphics-заглушку. */
+export const HUB_BACKGROUND_PATH: string | null = 'assets/backgrounds/hub_room.png';
 /** Тип ключа манифеста ассетов — используется для строгой типизации обращений. */
 export type AssetManifestKey = keyof typeof ASSET_MANIFEST;

@@ -15,6 +15,7 @@ import { GameState } from '../state/GameState';
 import { recordMinigameResult, saveProgress } from '../api/progressService';
 import type { MinigameResult } from '../types/MinigameResult';
 import type { MinigameType } from '../types/PlayerProgress';
+import { HUB_BACKGROUND_PATH } from '../config/assetManifest';
 
 /** Толщина стены комнаты в пикселях (используется и для рисования, и для коллайдеров). */
 const WALL_THICKNESS = TILE_SIZE;
@@ -133,32 +134,44 @@ export class HubScene extends Phaser.Scene {
    * коллайдеры стен. Вся геометрия смещена на roomOffsetX/roomOffsetY,
    * чтобы комната оказалась по центру канваса GAME_WIDTH x GAME_HEIGHT.
    */
-  private buildRoom(): void {
+  private buildRoom(): void { 
     const roomWidth = HUB_ROOM_WIDTH_TILES * TILE_SIZE;
     const roomHeight = HUB_ROOM_HEIGHT_TILES * TILE_SIZE;
 
     this.roomOffsetX = (GAME_WIDTH - roomWidth) / 2;
     this.roomOffsetY = (GAME_HEIGHT - roomHeight) / 2;
 
-    const graphics = this.add.graphics();
-    graphics.fillStyle(COLOR_FLOOR, 1);
-    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, roomHeight);
+        // Если PNG фона прописан в assetManifest.ts и реально загрузился в
+    // BootScene (проверка this.textures.exists() на случай, если файл
+    // не нашёлся на диске) — рисуем картинку на весь канвас (960×540,
+    // включая зону стен, которая уже нарисована художником внутри PNG).
+    // Иначе — старое поведение: цветные прямоугольники-заглушки.
+    const hasRealBackground =
+      HUB_BACKGROUND_PATH !== null && this.textures.exists(HUB_BACKGROUND_PATH);
 
-    graphics.fillStyle(COLOR_WALL, 1);
-    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, WALL_THICKNESS); // верхняя стена
-    graphics.fillRect(
-      this.roomOffsetX,
-      this.roomOffsetY + roomHeight - WALL_THICKNESS,
-      roomWidth,
-      WALL_THICKNESS,
-    ); // нижняя стена
-    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, WALL_THICKNESS, roomHeight); // левая стена
-    graphics.fillRect(
-      this.roomOffsetX + roomWidth - WALL_THICKNESS,
-      this.roomOffsetY,
-      WALL_THICKNESS,
-      roomHeight,
-    ); // правая стена
+    if (hasRealBackground) {
+      this.add.image(0, 0, HUB_BACKGROUND_PATH as string).setOrigin(0, 0);
+    } else {
+      const graphics = this.add.graphics();
+      graphics.fillStyle(COLOR_FLOOR, 1);
+      graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, roomHeight);
+
+      graphics.fillStyle(COLOR_WALL, 1);
+      graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, WALL_THICKNESS); // верхняя стена
+      graphics.fillRect(
+        this.roomOffsetX,
+        this.roomOffsetY + roomHeight - WALL_THICKNESS,
+        roomWidth,
+        WALL_THICKNESS,
+      ); // нижняя стена
+      graphics.fillRect(this.roomOffsetX, this.roomOffsetY, WALL_THICKNESS, roomHeight); // левая стена
+      graphics.fillRect(
+        this.roomOffsetX + roomWidth - WALL_THICKNESS,
+        this.roomOffsetY,
+        WALL_THICKNESS,
+        roomHeight,
+      ); // правая стена
+    }
 
     const walls = this.physics.add.staticGroup();
     walls.add(

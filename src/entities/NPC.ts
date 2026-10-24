@@ -1,5 +1,10 @@
 import Phaser from 'phaser';
-import { COLOR_TEXT_PRIMARY, INTERACTION_RADIUS, NPC_DISABLED_ALPHA } from '../config/constants';
+import {
+  COLOR_TEXT_PRIMARY,
+  INTERACTION_RADIUS,
+  NPC_DISABLED_ALPHA,
+  CHARACTER_DISPLAY_SCALE,
+} from '../config/constants';
 import { ASSET_MANIFEST, type AssetManifestKey } from '../config/assetManifest';
 import type { Player } from './Player';
 
@@ -58,9 +63,28 @@ export class NPC extends Phaser.GameObjects.Container {
     const descriptor = ASSET_MANIFEST[assetKey];
     this.displayName = descriptor.label;
 
-    const bodyRect = scene.add.rectangle(0, 0, descriptor.width, descriptor.height, descriptor.color);
-    bodyRect.setStrokeStyle(2, 0xffffff, 0.5);
+    const hasRealSprite = descriptor.spriteSheetPath !== null
+      && scene.textures.exists(descriptor.spriteSheetPath);
 
+    // Ровно один визуальный объект тела NPC: либо реальный PNG-спрайт
+    // (если текстура уже загружена), либо прямоугольник-плейсхолдер —
+    // та же логика, что и в Player.ts (см. комментарии там).
+    let bodyVisual: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
+
+    if (hasRealSprite) {
+      const sprite = scene.add.sprite(
+        0,
+        descriptor.height / 2,
+        descriptor.spriteSheetPath as string,
+      );
+      sprite.setOrigin(0.5, 1);
+      sprite.setScale(CHARACTER_DISPLAY_SCALE);
+      bodyVisual = sprite;
+    } else {
+      const rect = scene.add.rectangle(0, 0, descriptor.width, descriptor.height, descriptor.color);
+      rect.setStrokeStyle(2, 0xffffff, 0.5);
+      bodyVisual = rect;
+    }
     const nameLabel = scene.add.text(0, 0, descriptor.label, {
       fontFamily: 'monospace',
       fontSize: '12px',
@@ -80,7 +104,7 @@ export class NPC extends Phaser.GameObjects.Container {
     this.promptText.setY(-descriptor.height / 2 - 28);
     this.promptText.setVisible(false);
 
-    this.add([bodyRect, nameLabel, this.promptText]);
+    this.add([bodyVisual, nameLabel, this.promptText]);
     this.setSize(descriptor.width, descriptor.height);
 
     if (!this.isInteractive) {

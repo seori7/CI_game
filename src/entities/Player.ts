@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PLAYER_SPEED, COLOR_TEXT_PRIMARY } from '../config/constants';
+import { PLAYER_SPEED, COLOR_TEXT_PRIMARY, CHARACTER_DISPLAY_SCALE } from '../config/constants';
 import { ASSET_MANIFEST } from '../config/assetManifest';
 
 /**
@@ -39,7 +39,23 @@ export class Player extends Phaser.GameObjects.Container {
     let bodyVisual: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
 
     if (hasRealSprite) {
-      const sprite = scene.add.sprite(0, 0, descriptor.spriteSheetPath as string, 0);
+      // Точка опоры спрайта — центр по X, нижний край по Y (0.5, 1):
+      // "ноги" персонажа должны стоять на полу, а не висеть по центру.
+      // Локальная Y-координата = descriptor.height / 2 — это ровно нижняя
+      // граница прямоугольника физического тела (тело центрировано
+      // на (0,0) и имеет высоту descriptor.height), поэтому низ спрайта
+      // точно совпадёт с нижней гранью хитбокса персонажа.
+      const sprite = scene.add.sprite(
+        0,
+        descriptor.height / 2,
+        descriptor.spriteSheetPath as string,
+      );
+      sprite.setOrigin(0.5, 1);
+      // Исходный PNG 32×48 px отображается крупнее экранного разрешения
+      // без потери чёткости пиксель-арта (в gameConfig.ts включён
+      // pixelArt: true — сглаживание при масштабировании отключено).
+      sprite.setScale(CHARACTER_DISPLAY_SCALE);
+
       this.ensureWalkAnimations(scene, descriptor.spriteSheetPath as string);
       this.spriteRef = sprite;
       bodyVisual = sprite;
@@ -120,6 +136,22 @@ export class Player extends Phaser.GameObjects.Container {
     body.setVelocity(velocityX, velocityY);
     if (velocityX !== 0 || velocityY !== 0) {
       body.velocity.normalize().scale(PLAYER_SPEED);
+    }
+
+    // Отражение спрайта по горизонтали — единственная доступная "анимация"
+    // при статичном арте без отдельных кадров ходьбы. Предполагается, что
+    // PNG-файл нарисован персонажем, смотрящим вправо (это направление
+    // по умолчанию, flipX = false). При движении влево применяем зеркальное
+    // отражение (flipX = true); при движении строго вверх/вниз без
+    // горизонтальной составляющей — сохраняем последнее выбранное
+    // направление взгляда (ничего не меняем), чтобы персонаж не "дёргался"
+    // обратно вправо на каждом кадре движения по вертикали.
+    if (this.spriteRef !== null) {
+      if (velocityX < 0) {
+        this.spriteRef.setFlipX(true);
+      } else if (velocityX > 0) {
+        this.spriteRef.setFlipX(false);
+      }
     }
   }
     /**

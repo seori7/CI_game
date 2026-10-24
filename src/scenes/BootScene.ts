@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { COLOR_TEXT_PRIMARY, GAME_HEIGHT, GAME_WIDTH } from '../config/constants';
 
+import { ASSET_MANIFEST, HUB_BACKGROUND_PATH } from '../config/assetManifest';
 /** Длительность показа экрана загрузки (мс), чтобы дать визуальную обратную связь. */
 const BOOT_SPLASH_DURATION_MS = 300;
 
@@ -21,6 +22,22 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 32,
       frameHeight: 48,
     });
+        // Фон хаба, если уже готов.
+    if (HUB_BACKGROUND_PATH !== null) {
+      this.load.image(HUB_BACKGROUND_PATH, HUB_BACKGROUND_PATH);
+    }
+
+    // Спрайты персонажей — проходим по всем записям ASSET_MANIFEST
+    // (player + все NPC) и грузим тех, у кого spriteSheetPath не null.
+    // Проход "по всем ключам сразу" выбран специально: не нужно вручную
+    // перечислять player/max/nastya/lena — если позже в assetManifest.ts
+    // появится новый персонаж, грузиться он будет автоматически.
+    for (const key of Object.keys(ASSET_MANIFEST) as Array<keyof typeof ASSET_MANIFEST>) {
+      const descriptor = ASSET_MANIFEST[key];
+      if (descriptor.spriteSheetPath !== null) {
+        this.load.image(descriptor.spriteSheetPath, descriptor.spriteSheetPath);
+      }
+    }
   }
   
   public create(): void {
