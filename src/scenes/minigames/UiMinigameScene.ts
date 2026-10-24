@@ -1,7 +1,5 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, UI_SLOT_WIDTH, UI_SLOT_HEIGHT, UI_SLOT_GAP, UI_LEVEL_TIMES, UI_STRESS_TICKS, STRESS_BAR_WIDTH, STRESS_BAR_HEIGHT, STRESS_BAR_MAX } from '../../config/constants';
-import type { MinigameResult } from '../../types/MinigameResult';
-import { GameState } from '../../state/GameState';
 
 interface UiBlock { id: string; container: Phaser.GameObjects.Container; homeX: number; homeY: number; slotIndex: number | null; }
 interface UiSlot { x: number; y: number; occupiedBy: string | null; }
@@ -28,7 +26,6 @@ export class UiMinigameScene extends Phaser.Scene {
     this.currentLevel = 0; this.stressLevel = 0; this.isGameOver = false;
     this.attempts = data?.attempts || 1;
     this.buildBackground(); this.buildHud();
-    this.mapContainer = this.add.container(0, 0);
     this.startLevel(this.currentLevel);
 	}
   private startLevel(level: number): void {
@@ -118,25 +115,26 @@ export class UiMinigameScene extends Phaser.Scene {
 
   private setupDragHandlers(): void {
     this.input.off('drag'); this.input.off('dragend');
-    this.input.on('drag', (p: any, obj: Phaser.GameObjects.Container, x: number, y: number) => {
-      if (this.isGameOver) return;
-      obj.setPosition(x, y); this.children.bringToTop(obj);
-    });
-    this.input.on('dragend', (p: any, obj: Phaser.GameObjects.Container) => {
+    this.input.on('dragend', (_p: any, obj: Phaser.GameObjects.Container) => {
       if (this.isGameOver) return;
       const block = this.blocks.find(b => b.container === obj);
       if (!block) return;
       if (block.slotIndex !== null) { this.slots[block.slotIndex].occupiedBy = null; block.slotIndex = null; }
-      
-      let nearest = null; let minDist = 40;
+
+      let nearestIndex = -1;
+      let minDist = 40;
+
       this.slots.forEach((s, i) => {
         if (s.occupiedBy !== null) return;
         const dist = Phaser.Math.Distance.Between(obj.x, obj.y, s.x, s.y);
-        if (dist < minDist) { minDist = dist; nearest = { s, i }; }
+        if (dist < minDist) { minDist = dist; nearestIndex = i; }
       });
 
-      if (nearest) {
-        obj.setPosition(nearest.s.x, nearest.s.y); nearest.s.occupiedBy = block.id; block.slotIndex = nearest.i;
+      if (nearestIndex !== -1) {
+        const slot = this.slots[nearestIndex];
+        obj.setPosition(slot.x, slot.y);
+        slot.occupiedBy = block.id;
+        block.slotIndex = nearestIndex;
         this.checkWinCondition();
       } else {
         this.tweens.add({ targets: obj, x: block.homeX, y: block.homeY, duration: 150 });

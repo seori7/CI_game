@@ -20,7 +20,6 @@ import {
   STRESS_BAR_WIDTH,
 } from '../../config/constants';
 import type { MinigameResult } from '../../types/MinigameResult';
-import { GameState } from '../../state/GameState';
 
 /** Описание одной уязвимости на макете. */
 interface SecurityBug {
@@ -231,7 +230,7 @@ export class ProgrammerMinigameScene extends Phaser.Scene {
       hitRect.setInteractive({ useHandCursor: true });
       hitRect.on('pointerover', () => { if (!bug.isFound && !this.isGameOver) hitRect.setFillStyle(COLOR_BUG_HOVER, 0.4); });
       hitRect.on('pointerout', () => { if (!bug.isFound) hitRect.setFillStyle(COLOR_BUG_HOVER, 0); });
-      hitRect.on('pointerdown', (p: any, lx: any, ly: any, event: any) => {
+      hitRect.on('pointerdown', (_p: any, _lx: any, _ly: any, event: any) => {
         event.stopPropagation(); // Не пропускаем клик к фону браузера (чтобы не было штрафа)
         this.handleBugFound(bug);
       });
