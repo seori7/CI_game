@@ -1,7 +1,12 @@
 import Phaser from 'phaser';
 import { COLOR_TEXT_PRIMARY, GAME_HEIGHT, GAME_WIDTH } from '../config/constants';
 
-import { ASSET_MANIFEST, HUB_BACKGROUND_PATH } from '../config/assetManifest';
+import {
+  ASSET_MANIFEST,
+  HUB_BACKGROUND_PATH,
+  HUB_FURNITURE_LAYER_PATH,
+  MENU_BACKGROUND_PATH,
+} from '../config/assetManifest';
 /** Длительность показа экрана загрузки (мс), чтобы дать визуальную обратную связь. */
 const BOOT_SPLASH_DURATION_MS = 300;
 
@@ -22,9 +27,12 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 32,
       frameHeight: 48,
     });
-        // Фон хаба, если уже готов.
-    if (HUB_BACKGROUND_PATH !== null) {
-      this.load.image(HUB_BACKGROUND_PATH, HUB_BACKGROUND_PATH);
+    // Фон хаба, слой мебели и фон меню. Ключ текстуры = путь, как и для спрайтов ниже.
+    // null означает, что ассета в проекте нет, и его не грузим.
+    for (const path of [HUB_BACKGROUND_PATH, HUB_FURNITURE_LAYER_PATH, MENU_BACKGROUND_PATH]) {
+      if (path !== null) {
+        this.load.image(path, path);
+      }
     }
 
     // Спрайты персонажей — проходим по всем записям ASSET_MANIFEST

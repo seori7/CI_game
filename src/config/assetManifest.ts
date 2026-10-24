@@ -78,5 +78,15 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
 
 /** Путь к фоновому изображению хаба. null = рисуем Graphics-заглушку. */
 export const HUB_BACKGROUND_PATH: string | null = 'assets/backgrounds/hub_room.png';
+
+/**
+ * Слой мебели хаба (только парты, фон прозрачный, 960×540). Рисуется поверх
+ * пола, чтобы персонаж мог заходить за парты. null = парты не рисуются
+ * отдельно, работают только коллайдеры.
+ */
+export const HUB_FURNITURE_LAYER_PATH: string | null = 'assets/backgrounds/hub_furniture.png';
+
+/** Фон экрана ввода ника (960×540). null = цветная заглушка. */
+export const MENU_BACKGROUND_PATH: string | null = 'assets/ui/menu_background.png';
 /** Тип ключа манифеста ассетов — используется для строгой типизации обращений. */
 export type AssetManifestKey = keyof typeof ASSET_MANIFEST;

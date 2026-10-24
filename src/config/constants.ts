@@ -1,3 +1,4 @@
+import type { HubDeskLayout } from '../types/HubLayout';
 /**
  * Центральный файл числовых и прочих "магических" констант игры.
  * Все значения, влияющие на баланс, геометрию сцены и тайминги,
@@ -242,3 +243,160 @@ export const STORAGE_KEY_PROGRESS = 'profpath_progress_fallback';
 
 /** Ключ localStorage для очереди несинхронизированных результатов мини-игр. */
 export const STORAGE_KEY_PENDING_RESULTS = 'profpath_pending_minigame_results';
+
+// ---------------------------------------------------------------------------
+// Хаб: мебель (парты) и порядок отрисовки.
+// ---------------------------------------------------------------------------
+
+/**
+ * Базовый depth слоя мебели хаба. Фон и стены имеют depth 0, поэтому парты
+ * и персонаж (с depth выше этого значения) рисуются поверх фона.
+ */
+export const HUB_FURNITURE_BASE_DEPTH = 10;
+
+/**
+ * Дробная добавка к depth персонажа. Нужна, чтобы персонаж стоял СТРОГО между
+ * партами: целое значение совпало бы с depth парты и порядок зависел бы от
+ * порядка создания объектов.
+ */
+export const HUB_ENTITY_DEPTH_OFFSET = 0.5;
+
+/** Depth подсказок и отладочной графики: поверх всего хаба. */
+export const HUB_UI_DEPTH = 1000;
+
+/**
+ * Отладочная отрисовка физических тел (коллайдеры парт и хитбокс игрока).
+ * Нужна для подгонки HUB_DESKS. В сборке для демо должно быть false.
+ */
+export const HUB_DEBUG_COLLISIONS = true;
+
+/**
+ * Парты хаба. Координаты в пикселях ВСЕГО канваса 960×540 (как в hub_room.png),
+ * а не относительно комнаты.
+ * ЗНАЧЕНИЯ УСЛОВНЫЕ: замени их на реальные координаты с PNG и сверь через HUB_DEBUG_COLLISIONS.
+ *   x, y, width, height: прямоугольник всей парты (то, что рисует слой мебели);
+ *   footprintHeight: высота нижней полосы парты, которой она стоит на полу.
+ *                    Только эта полоса непроходима для персонажа.
+ */
+/**
+ * Ручные координаты парт. Пустой массив = парты определяются автоматически
+ * по прозрачности слоя hub_furniture.png (см. detectDeskLayouts.ts).
+ * Заполняй вручную только если автоопределение склеивает две соседние парты
+ * в одну; тогда формат тот же: x, y, width, height, footprintHeight в px канваса 960×540.
+ */
+
+/**
+ * Порог непрозрачности пикселя слоя мебели (0–255), начиная с которого пиксель
+ * считается частью парты. Полупрозрачные тени ниже порога и не склеивают парты.
+ */
+export const HUB_DESK_ALPHA_THRESHOLD = 128;
+
+/**
+ * Минимальная площадь связной области (px²), чтобы считать её партой.
+ * Отсекает мелкий шум и артефакты экспорта. Парта 96×64 даёт около 6000 px².
+ */
+export const HUB_DESK_MIN_AREA_PX = 1500;
+
+/**
+ * Зазор (px), при котором два фрагмента одной парты склеиваются в один прямоугольник.
+ * Нужен потому, что столешница и ножки парты на слое разделены прозрачной полосой.
+ */
+export const HUB_DESK_MERGE_GAP_PX = 8;
+/**
+ * Высота нижней полосы парты (px), которой она стоит на полу.
+ * Эта полоса непроходима для персонажа. Подбирается по картинке: обычно 12–20 px.
+ */
+export const HUB_DESK_FOOTPRINT_HEIGHT_PX = 16;
+
+/**
+ * Координаты парт хаба в пикселях канваса 960×540 (как в hub_furniture.png).
+ * Сетка 4 колонки × 3 ряда плюс учительский стол. Заданы вручную: автоопределение
+ * нашло колонки верно, но ряды 1 и 2 склеились из-за теней, поэтому ряды
+ * восстановлены по шагу 62 px.
+ */
+export const HUB_DESKS: HubDeskLayout[] = [
+  // Учительский стол у доски.
+  { x: 349, y: 159, width: 184, height: 85, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+
+  // Ряд 1 (y = 260).
+  { x: 223, y: 260, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 361, y: 260, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 493, y: 260, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 642, y: 260, width: 76, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+
+  // Ряд 2 (y = 322).
+  { x: 223, y: 322, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 361, y: 322, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 493, y: 322, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 642, y: 322, width: 76, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+
+  // Ряд 3 (y = 385).
+  { x: 223, y: 385, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 361, y: 385, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 493, y: 385, width: 75, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+  { x: 642, y: 385, width: 76, height: 56, footprintHeight: HUB_DESK_FOOTPRINT_HEIGHT_PX },
+];
+
+// ---------------------------------------------------------------------------
+// Экран ввода ника (NicknameScene).
+// ---------------------------------------------------------------------------
+
+/** Размер заголовка «ПрофПуть» (px). */
+export const MENU_TITLE_FONT_SIZE_PX = 48;
+/** Размер подзаголовка (px). */
+export const MENU_SUBTITLE_FONT_SIZE_PX = 18;
+/** Размер строки статуса и ошибок (px). */
+export const MENU_STATUS_FONT_SIZE_PX = 14;
+/** Размер подсказки под формой (px). */
+export const MENU_HINT_FONT_SIZE_PX = 12;
+
+/** Вертикальные смещения текстов от центра экрана (px, отрицательные — вверх). */
+export const MENU_TITLE_OFFSET_Y = -150;
+export const MENU_SUBTITLE_OFFSET_Y = -96;
+/** Статус выводится под HTML-панелью с запасом (панель ~110px по высоте). */
+export const MENU_STATUS_OFFSET_Y = 110;
+
+/** Обводка и смещение тени заголовка: даёт «пиксельный» объём. */
+export const MENU_TITLE_STROKE_THICKNESS = 6;
+export const MENU_TITLE_SHADOW_OFFSET = 4;
+export const MENU_TITLE_STROKE_COLOR = '#1a202c';
+export const MENU_STATUS_COLOR = '#fca5a5';
+
+/** Цвет фона-заглушки, если PNG меню не загрузился (hex для Phaser). */
+export const MENU_FALLBACK_BG_COLOR = 0x0f172a;
+
+// Цвета HTML-панели (CSS-строки). Phaser-цвета выше — в hex-числах.
+export const MENU_CSS_PANEL_BG = 'rgba(15, 23, 42, 0.92)';
+export const MENU_CSS_ACCENT = '#4fd1c5';
+export const MENU_CSS_ACCENT_HOVER = '#81e6d9';
+export const MENU_CSS_INPUT_BG = '#1a202c';
+export const MENU_CSS_TEXT = '#f7fafc';
+export const MENU_CSS_TEXT_ON_ACCENT = '#1a202c';
+export const MENU_CSS_MUTED = '#94a3b8';
+export const MENU_CSS_SHADOW = '#000000';
+
+/** Геометрия HTML-панели формы (px). */
+export const MENU_FORM_PADDING_PX = 20;
+export const MENU_FORM_GAP_PX = 12;
+export const MENU_FORM_BORDER_PX = 3;
+/** Смещение жёсткой (без размытия) тени панели. */
+export const MENU_FORM_SHADOW_PX = 6;
+export const MENU_INPUT_WIDTH_PX = 200;
+export const MENU_CONTROL_PADDING_Y_PX = 8;
+export const MENU_CONTROL_PADDING_X_PX = 12;
+/** 16px: меньше этого iOS Safari увеличивает страницу при фокусе на input. */
+export const MENU_CONTROL_FONT_SIZE_PX = 16;
+/** Прозрачность заблокированных элементов формы во время загрузки. */
+export const MENU_DISABLED_OPACITY = 0.6;
+
+
+// ---------------------------------------------------------------------------
+// Хаб: прямоугольник пола, по которому может ходить персонаж.
+// ---------------------------------------------------------------------------
+
+export const HUB_WALKABLE_RECT = {
+  left: 160,
+  top: 145,
+  right: 800,
+  bottom: 460,
+};

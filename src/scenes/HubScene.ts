@@ -1,21 +1,25 @@
 import Phaser from 'phaser';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
+import { HubFurniture } from './hub/HubFurniture';
 import {
   COLOR_FLOOR,
   COLOR_TEXT_PRIMARY,
   COLOR_WALL,
   GAME_HEIGHT,
   GAME_WIDTH,
+  HUB_DESKS,
   HUB_ROOM_HEIGHT_TILES,
   HUB_ROOM_WIDTH_TILES,
+  HUB_UI_DEPTH,
   TILE_SIZE,
+  HUB_WALKABLE_RECT
 } from '../config/constants';
 import { GameState } from '../state/GameState';
 import { recordMinigameResult, saveProgress } from '../api/progressService';
 import type { MinigameResult } from '../types/MinigameResult';
 import type { MinigameType } from '../types/PlayerProgress';
-import { HUB_BACKGROUND_PATH } from '../config/assetManifest';
+import { HUB_BACKGROUND_PATH} from '../config/assetManifest';
 
 /** Толщина стены комнаты в пикселях (используется и для рисования, и для коллайдеров). */
 const WALL_THICKNESS = TILE_SIZE;
@@ -57,6 +61,7 @@ export class HubScene extends Phaser.Scene {
   private player!: Player;
   private npcList: NPC[] = [];
   private cursorKeys!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private furniture!: HubFurniture;
   private interactKey!: Phaser.Input.Keyboard.Key;
   private nearbyNpc: NPC | null = null;
   private hintText!: Phaser.GameObjects.Text;
@@ -93,10 +98,14 @@ export class HubScene extends Phaser.Scene {
     super('HubScene');
   }
 
+  
   /** Жизненный цикл Phaser: построение комнаты, игрока, NPC и обработчиков событий. */
   public create(): void {
     this.buildRoom();
     this.spawnPlayerAndNpcs();
+
+    this.furniture = new HubFurniture(this, HUB_DESKS);
+    this.furniture.collideWith(this.player);
 
     this.cursorKeys = this.input.keyboard!.createCursorKeys();
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
@@ -110,6 +119,7 @@ export class HubScene extends Phaser.Scene {
     });
     this.hintText.setOrigin(0.5, 0);
     this.hintText.setScrollFactor(0);
+    this.hintText.setDepth(HUB_UI_DEPTH);
     this.updateHintText();
 
     // Глобальные события (game.events), т.к. DialogueScene/мини-игры — это
@@ -121,6 +131,36 @@ export class HubScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.detachGlobalListeners());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.detachGlobalListeners());
   }
+    /**
+   * Физические границы хаба: всё вне HUB_WALKABLE_RECT непроходимо.
+   * Раньше стены стояли по рамке комнаты, но арт задней стены занимает
+   * верхнюю часть комнаты, поэтому персонаж заходил на неё.
+   * Теперь четыре блока окружают прямоугольник пола, а границы мира совпадают с ним.
+   */
+  private buildWalkableBounds(): void {
+    const { left, top, right, bottom } = HUB_WALKABLE_RECT;
+    const walls = this.physics.add.staticGroup();
+
+    // Блоки тянутся до края канваса, поэтому закрывают и арт за пределами
+    // комнаты, и зазоры между блоками. Origin (0, 0) задаётся до add в группу,
+    // иначе физическое тело создастся со смещением.
+    const blocks = [
+      { x: 0, y: 0, width: GAME_WIDTH, height: top }, // задняя стена
+      { x: 0, y: bottom, width: GAME_WIDTH, height: GAME_HEIGHT - bottom }, // низ
+      { x: 0, y: top, width: left, height: bottom - top }, // левая стена
+      { x: right, y: top, width: GAME_WIDTH - right, height: bottom - top }, // правая стена
+    ];
+    for (const block of blocks) {
+      walls.add(
+        this.add
+          .rectangle(block.x, block.y, block.width, block.height)
+          .setOrigin(0, 0)
+          .setVisible(false),
+      );
+    }
+
+    this.physics.world.setBounds(left, top, right - left, bottom - top);
+  }
 
   /** Отписывается от глобальных событий, чтобы избежать утечек и двойных обработчиков. */
   private detachGlobalListeners(): void {
@@ -129,6 +169,7 @@ export class HubScene extends Phaser.Scene {
     this.game.events.off('minigame-exit', this.onMinigameExit);
   }
 
+  
   /**
    * Рисует пол и стены комнаты через Graphics и расставляет статичные
    * коллайдеры стен. Вся геометрия смещена на roomOffsetX/roomOffsetY,
@@ -173,54 +214,7 @@ export class HubScene extends Phaser.Scene {
       ); // правая стена
     }
 
-    const walls = this.physics.add.staticGroup();
-    walls.add(
-      this.add
-        .rectangle(
-          this.roomOffsetX + roomWidth / 2,
-          this.roomOffsetY + WALL_THICKNESS / 2,
-          roomWidth,
-          WALL_THICKNESS,
-        )
-        .setVisible(false),
-    );
-    walls.add(
-      this.add
-        .rectangle(
-          this.roomOffsetX + roomWidth / 2,
-          this.roomOffsetY + roomHeight - WALL_THICKNESS / 2,
-          roomWidth,
-          WALL_THICKNESS,
-        )
-        .setVisible(false),
-    );
-    walls.add(
-      this.add
-        .rectangle(
-          this.roomOffsetX + WALL_THICKNESS / 2,
-          this.roomOffsetY + roomHeight / 2,
-          WALL_THICKNESS,
-          roomHeight,
-        )
-        .setVisible(false),
-    );
-    walls.add(
-      this.add
-        .rectangle(
-          this.roomOffsetX + roomWidth - WALL_THICKNESS / 2,
-          this.roomOffsetY + roomHeight / 2,
-          WALL_THICKNESS,
-          roomHeight,
-        )
-        .setVisible(false),
-    );
-
-    this.physics.world.setBounds(
-      this.roomOffsetX + WALL_THICKNESS,
-      this.roomOffsetY + WALL_THICKNESS,
-      roomWidth - WALL_THICKNESS * 2,
-      roomHeight - WALL_THICKNESS * 2,
-    );
+    this.buildWalkableBounds();
 
     // Камера намеренно не скроллится: комната целиком помещается в кадр
     // GAME_WIDTH x GAME_HEIGHT, поэтому отдельных границ камеры и слежения
@@ -285,6 +279,8 @@ export class HubScene extends Phaser.Scene {
    * близости NPC не выполняется.
    */
   public override update(): void {
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
+    this.player.setDepth(this.furniture.getDepthForFeetY(playerBody.bottom));
     if (!this.controlsEnabled) {
       this.player.stopMovement();
       return;
