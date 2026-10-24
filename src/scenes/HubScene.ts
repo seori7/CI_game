@@ -343,7 +343,7 @@ export class HubScene extends Phaser.Scene {
     });
   }
 
-  /**
+   /**
    * Обрабатывает завершение диалога: если ink-сценарий запросил мини-игру —
    * запускает соответствующую сцену (управление остаётся выключенным),
    * иначе возвращает управление игроку.
@@ -351,8 +351,17 @@ export class HubScene extends Phaser.Scene {
    */
   private handleDialogueComplete(payload: DialogueCompletePayload): void {
     if (payload.minigameToLaunch !== null) {
-      const sceneKey = MINIGAME_SCENE_BY_TYPE[payload.minigameToLaunch];
-      this.scene.launch(sceneKey);
+      
+      // ПЕРЕХВАТ: Если поговорили с Масей — открываем Меню стажировки!
+      if (payload.minigameToLaunch === 'programmer') {
+        this.scene.launch('CatalogScene');
+      } 
+      // Для остальных NPC (если они понадобятся) логика старая:
+      else {
+        const sceneKey = MINIGAME_SCENE_BY_TYPE[payload.minigameToLaunch];
+        this.scene.launch(sceneKey);
+      }
+      
     } else {
       this.controlsEnabled = true;
     }

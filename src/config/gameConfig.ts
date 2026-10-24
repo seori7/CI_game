@@ -8,6 +8,11 @@ import { ProgrammerMinigameScene } from '../scenes/minigames/ProgrammerMinigameS
 import { MedicMinigameScene } from '../scenes/minigames/MedicMinigameScene';
 import { BuilderMinigameScene } from '../scenes/minigames/BuilderMinigameScene';
 
+// 1. ИМПОРТИРУЕМ НОВЫЕ СЦЕНЫ
+import { CatalogScene } from '../scenes/CatalogScene';
+import { UiMinigameScene } from '../scenes/minigames/UiMinigameScene';
+import { DroneMinigameScene } from '../scenes/minigames/DroneMinigameScene';
+
 /**
  * Базовая конфигурация игры Phaser. Список сцен задаёт порядок их
  * регистрации (не порядок запуска — запуск определяется явными вызовами
@@ -39,5 +44,10 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     ProgrammerMinigameScene,
     MedicMinigameScene,
     BuilderMinigameScene,
+    
+    // 2. РЕГИСТРИРУЕМ ИХ В ДВИЖКЕ
+    CatalogScene,
+    UiMinigameScene,
+    DroneMinigameScene,
   ],
 };
