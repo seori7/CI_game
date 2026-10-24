@@ -1,6 +1,18 @@
 import Phaser from 'phaser';
 import { DialogueManager } from '../dialogue/DialogueManager';
-import { COLOR_TEXT_PRIMARY, DIALOGUE_TYPING_SPEED_MS, GAME_HEIGHT, GAME_WIDTH } from '../config/constants';
+import {
+  COLOR_TEXT_PRIMARY,
+  DIALOGUE_BODY_OFFSET_Y,
+  DIALOGUE_BOX_HEIGHT,
+  DIALOGUE_BOX_PADDING,
+  DIALOGUE_CHOICE_LINE_HEIGHT,
+  DIALOGUE_CHOICES_GAP_Y,
+  DIALOGUE_NAME_OFFSET_Y,
+  DIALOGUE_PROMPT_MARGIN_Y,
+  DIALOGUE_TYPING_SPEED_MS,
+  GAME_HEIGHT,
+  GAME_WIDTH,
+} from '../config/constants';
 import type { DialogueState } from '../types/DialogueTypes';
 import type { MinigameType } from '../types/PlayerProgress';
 
@@ -25,10 +37,6 @@ interface DialogueSceneData {
   dialogueStoryPath: string;
 }
 
-/** Геометрия и отступы диалогового окна. */
-const DIALOGUE_BOX_HEIGHT = 170;
-const DIALOGUE_BOX_PADDING = 24;
-const CHOICE_LINE_HEIGHT = 30;
 
 /**
  * UI-сцена диалога. Запускается поверх HubScene через scene.launch() и
@@ -85,14 +93,14 @@ export class DialogueScene extends Phaser.Scene {
     this.boxGraphics.lineStyle(2, 0x4fd1c5, 1);
     this.boxGraphics.strokeRect(0, boxY, GAME_WIDTH, DIALOGUE_BOX_HEIGHT);
 
-    this.add.text(DIALOGUE_BOX_PADDING, boxY + 12, this.npcId.toUpperCase(), {
+    this.add.text(DIALOGUE_BOX_PADDING, boxY + DIALOGUE_NAME_OFFSET_Y, this.npcId.toUpperCase(), {
       fontFamily: 'monospace',
       fontSize: '14px',
       color: '#4fd1c5',
       fontStyle: 'bold',
     });
 
-    this.bodyText = this.add.text(DIALOGUE_BOX_PADDING, boxY + 38, '', {
+    this.bodyText = this.add.text(DIALOGUE_BOX_PADDING, boxY + DIALOGUE_BODY_OFFSET_Y, '', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: `#${COLOR_TEXT_PRIMARY.toString(16)}`,
@@ -101,7 +109,7 @@ export class DialogueScene extends Phaser.Scene {
 
     this.continuePrompt = this.add.text(
       GAME_WIDTH - DIALOGUE_BOX_PADDING,
-      GAME_HEIGHT - 16,
+      GAME_HEIGHT - DIALOGUE_PROMPT_MARGIN_Y,
       'ПРОБЕЛ ▸',
       {
         fontFamily: 'monospace',
@@ -182,32 +190,51 @@ export class DialogueScene extends Phaser.Scene {
   }
 
   /**
-   * Отрисовывает кнопки вариантов ответа как интерактивные текстовые объекты.
-   * @param choices список вариантов, полученных от DialogueManager
-   */
-  private renderChoices(choices: DialogueState['choices']): void {
-    this.clearChoiceButtons();
-    const startY = GAME_HEIGHT - DIALOGUE_BOX_HEIGHT + 40;
+ * Отрисовывает кнопки вариантов ответа под ФАКТИЧЕСКИМ текстом реплики.
+ * Раньше кнопки стояли по фиксированной координате и наезжали на реплики
+ * из 3–4 строк. Теперь первая кнопка идёт от нижнего края bodyText,
+ * поэтому кнопки всегда оказываются под текстом, какой бы длины он ни был.
+ * Вызывается только после окончания печати, когда bodyText уже содержит
+ * полный текст и его height актуален.
+ * @param choices список вариантов, полученных от DialogueManager
+ */
+private renderChoices(choices: DialogueState['choices']): void {
+  this.clearChoiceButtons();
 
-    choices.forEach((choice, position) => {
-      const text = this.add.text(
-        GAME_WIDTH / 2,
-        startY + position * CHOICE_LINE_HEIGHT,
-        `▸ ${choice.text}`,
-        {
-          fontFamily: 'monospace',
-          fontSize: '16px',
-          color: '#fde68a',
-        },
-      );
-      text.setOrigin(0.5, 0.5);
-      text.setInteractive({ useHandCursor: true });
-      text.on('pointerover', () => text.setColor('#fff7cc'));
-      text.on('pointerout', () => text.setColor('#fde68a'));
-      text.on('pointerdown', () => this.handleChoiceSelected(choice.index));
-      this.choiceTexts.push(text);
-    });
+  const textBottomY = this.bodyText ? this.bodyText.y + this.bodyText.height : 0;
+  const choicesTopY = textBottomY + DIALOGUE_CHOICES_GAP_Y;
+
+  // Предупреждаем, если кнопки не влезают в окно: так проблему заметят
+  // при добавлении нового ink-контента, а не при демо.
+  const choicesBottomY = choicesTopY + choices.length * DIALOGUE_CHOICE_LINE_HEIGHT;
+  if (choicesBottomY > GAME_HEIGHT) {
+    console.warn(
+      `[DialogueScene] Варианты выбора не помещаются в окно: нижний край ${choicesBottomY}px ` +
+        `при высоте экрана ${GAME_HEIGHT}px. Увеличь DIALOGUE_BOX_HEIGHT или сократи реплику.`,
+    );
   }
+
+  choices.forEach((choice, position) => {
+    const text = this.add.text(
+      GAME_WIDTH / 2,
+      choicesTopY + position * DIALOGUE_CHOICE_LINE_HEIGHT,
+      `▸ ${choice.text}`,
+      {
+        fontFamily: 'monospace',
+        fontSize: '16px',
+        color: '#fde68a',
+      },
+    );
+    // Origin по верхнему краю (0.5, 0): Y указывает на верх строки,
+    // поэтому шаг DIALOGUE_CHOICE_LINE_HEIGHT соответствует реальной высоте строки.
+    text.setOrigin(0.5, 0);
+    text.setInteractive({ useHandCursor: true });
+    text.on('pointerover', () => text.setColor('#fff7cc'));
+    text.on('pointerout', () => text.setColor('#fde68a'));
+    text.on('pointerdown', () => this.handleChoiceSelected(choice.index));
+    this.choiceTexts.push(text);
+  });
+}
 
   /** Удаляет все текущие кнопки выбора со сцены. */
   private clearChoiceButtons(): void {
