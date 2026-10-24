@@ -326,7 +326,7 @@ export const HUB_UI_DEPTH = 1000;
  * Отладочная отрисовка физических тел (коллайдеры парт и хитбокс игрока).
  * Нужна для подгонки HUB_DESKS. В сборке для демо должно быть false.
  */
-export const HUB_DEBUG_COLLISIONS = true;
+export const HUB_DEBUG_COLLISIONS = false;
 
 /**
  * Парты хаба. Координаты в пикселях ВСЕГО канваса 960×540 (как в hub_room.png),
@@ -454,7 +454,7 @@ export const MENU_DISABLED_OPACITY = 0.6;
 
 export const HUB_WALKABLE_RECT = {
   left: 160,
-  top: 145,
+  top: 165,
   right: 800,
   bottom: 460,
 };
@@ -480,3 +480,45 @@ export const CHARACTER_LABEL_EXTRA_OFFSET_Y: Partial<Record<string, number>> = {
   npc_nastya: 0,
   npc_lena: 8,
 };
+// ---------------------------------------------------------------------------
+// Анимации главного меню ONWAY.
+// ---------------------------------------------------------------------------
+
+/** Длительность затемнения при входе в игру. */
+export const MENU_FADE_OUT_MS = 850;
+
+/** Длительность появления хаба после загрузки. */
+export const MENU_FADE_IN_MS = 700;
+
+/** Время показа приветственной надписи. */
+export const MENU_WELCOME_DURATION_MS = 650;
+
+/** Продолжительность одного цикла пульсации заголовка. */
+export const MENU_TITLE_PULSE_MS = 1800;
+
+/** Насколько увеличивается заголовок во время пульсации. */
+export const MENU_TITLE_PULSE_SCALE = 1.035;
+
+/** Продолжительность анимации кнопки при наведении. */
+export const MENU_BUTTON_HOVER_MS = 140;
+
+/** Смещение кнопки вверх при наведении. */
+export const MENU_BUTTON_HOVER_OFFSET_PX = 4;
+
+/** Продолжительность нажатия кнопки. */
+export const MENU_BUTTON_PRESS_MS = 100;
+
+/** Цвет затемнения между сценами. */
+export const MENU_TRANSITION_COLOR = 0x000000;
+
+/** Размер приветственного текста. */
+export const MENU_WELCOME_FONT_SIZE_PX = 26;
+
+/** Цвет приветственного текста. */
+export const MENU_WELCOME_TEXT_COLOR = '#ffffff';
+
+/** Прозрачность приветственного текста в начале перехода. */
+export const MENU_WELCOME_INITIAL_ALPHA = 0;
+
+/** Длительность появления приветственной надписи. */
+export const MENU_WELCOME_FADE_MS = 350;
