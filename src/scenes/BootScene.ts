@@ -21,12 +21,6 @@ export class BootScene extends Phaser.Scene {
   }
 
  public preload(): void {
-    // Пока файла нет — просто не вызывайте load для конкретного ключа,
-    // и Player/NPC продолжат рисовать Rectangle-плейсхолдер (см. шаг 3)
-    this.load.spritesheet('player', 'assets/sprites/player.png', {
-      frameWidth: 32,
-      frameHeight: 48,
-    });
     // Фон хаба, слой мебели и фон меню. Ключ текстуры = путь, как и для спрайтов ниже.
     // null означает, что ассета в проекте нет, и его не грузим.
     for (const path of [HUB_BACKGROUND_PATH, HUB_FURNITURE_LAYER_PATH, MENU_BACKGROUND_PATH]) {
@@ -40,12 +34,35 @@ export class BootScene extends Phaser.Scene {
     // Проход "по всем ключам сразу" выбран специально: не нужно вручную
     // перечислять player/max/nastya/lena — если позже в assetManifest.ts
     // появится новый персонаж, грузиться он будет автоматически.
-    for (const key of Object.keys(ASSET_MANIFEST) as Array<keyof typeof ASSET_MANIFEST>) {
-      const descriptor = ASSET_MANIFEST[key];
-      if (descriptor.spriteSheetPath !== null) {
-        this.load.image(descriptor.spriteSheetPath, descriptor.spriteSheetPath);
-      }
-    }
+// Загружаем персонажей по данным манифеста.
+// Спрайтлист игрока требует разбиения на кадры,
+// а статичные NPC загружаются как обычные изображения.
+for (const key of Object.keys(ASSET_MANIFEST) as Array<keyof typeof ASSET_MANIFEST>) {
+  const descriptor = ASSET_MANIFEST[key];
+
+  if (descriptor.spriteSheetPath === null) {
+    continue;
+  }
+
+  if (
+    descriptor.frameWidth !== undefined &&
+    descriptor.frameHeight !== undefined
+  ) {
+    this.load.spritesheet(
+      descriptor.spriteSheetPath,
+      descriptor.spriteSheetPath,
+      {
+        frameWidth: descriptor.frameWidth,
+        frameHeight: descriptor.frameHeight,
+      },
+    );
+  } else {
+    this.load.image(
+      descriptor.spriteSheetPath,
+      descriptor.spriteSheetPath,
+    );
+  }
+}
   }
   
   public create(): void {

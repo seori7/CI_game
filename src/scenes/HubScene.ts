@@ -241,7 +241,7 @@ export class HubScene extends Phaser.Scene {
       new NPC(
         this,
         this.roomOffsetX + TILE_SIZE * 2.5,
-        this.roomOffsetY + TILE_SIZE * 2.5,
+        this.roomOffsetY + TILE_SIZE * 4,
         'max',
         'npc_max',
         'max',
@@ -249,8 +249,8 @@ export class HubScene extends Phaser.Scene {
       ),
       new NPC(
         this,
-        this.roomOffsetX + roomWidth - TILE_SIZE * 2.5,
-        this.roomOffsetY + TILE_SIZE * 2.5,
+        this.roomOffsetX + roomWidth - TILE_SIZE * 5,
+        this.roomOffsetY + TILE_SIZE * 3,
         'nastya',
         'npc_nastya',
         'nastya',
@@ -258,8 +258,8 @@ export class HubScene extends Phaser.Scene {
       ),
       new NPC(
         this,
-        this.roomOffsetX + roomWidth - TILE_SIZE * 2.5,
-        this.roomOffsetY + roomHeight - TILE_SIZE * 2.5,
+        this.roomOffsetX + roomWidth - TILE_SIZE * 1,
+        this.roomOffsetY + roomHeight - TILE_SIZE * 3,
         'lena',
         'npc_lena',
         'lena',

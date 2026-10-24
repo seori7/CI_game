@@ -111,7 +111,7 @@ export class HubFurniture {
       .image(0, 0, layerKey)
       .setOrigin(0, 0)
       .setCrop(desk.x, desk.y, desk.width, desk.height)
-      .setDepth(HUB_FURNITURE_BASE_DEPTH + index);
+      .setDepth(HUB_FURNITURE_BASE_DEPTH + index+1);
   }
 
   /**
