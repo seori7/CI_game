@@ -55,6 +55,9 @@ export const COLOR_NPC_NASTYA = 0xf6ad55;
 /** Цвет прямоугольника-плейсхолдера NPC "Лена" (медик). */
 export const COLOR_NPC_LENA = 0xfc8181;
 
+/** Прозрачность NPC, временно отключённых от сюжета (их ветка ещё не готова/не в фокусе). */
+export const NPC_DISABLED_ALPHA = 0.35;
+
 /** Цвет пола комнаты-хаба. */
 export const COLOR_FLOOR = 0x2d3748;
 

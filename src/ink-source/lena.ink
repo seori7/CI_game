@@ -1,4 +1,4 @@
-// Диалог с Леной — врачом.
+// Диалог с Юни — врачом.
 // Компилируется в src/dialogue/stories/lena.ink.json через npm run compile:ink.
 VAR launch_minigame = ""
 

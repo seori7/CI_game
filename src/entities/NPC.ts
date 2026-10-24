@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLOR_TEXT_PRIMARY, INTERACTION_RADIUS } from '../config/constants';
+import { COLOR_TEXT_PRIMARY, INTERACTION_RADIUS, NPC_DISABLED_ALPHA } from '../config/constants';
 import { ASSET_MANIFEST, type AssetManifestKey } from '../config/assetManifest';
 import type { Player } from './Player';
 
@@ -9,13 +9,24 @@ import type { Player } from './Player';
  * Как и Player, визуально представлен прямоугольником-плейсхолдером из
  * assetManifest.ts — замена на спрайт-анимацию в будущем потребует правки
  * только этого файла (конструктора), а не сцен, которые NPC используют.
+ *
+ * NPC может быть временно "отключён" от сюжета (параметр isInteractive):
+ * такой NPC визуально притушен (alpha = NPC_DISABLED_ALPHA), никогда не
+ * показывает подсказку "Нажать E" и не должен запускать диалог — проверку
+ * на это (npc.isInteractive) обязана выполнять вызывающая сцена (HubScene).
  */
 export class NPC extends Phaser.GameObjects.Container {
-  /** Уникальный идентификатор NPC (используется DialogueScene и HubScene). */
+  /** Уникальный технический идентификатор NPC (используется DialogueScene и HubScene). */
   public readonly npcId: string;
 
   /** Путь/ключ диалогового сценария, который нужно загрузить для этого NPC. */
   public readonly dialogueStoryPath: string;
+
+  /** Человекочитаемое отображаемое имя NPC (берётся из assetManifest.ts). */
+  public readonly displayName: string;
+
+  /** Доступен ли сейчас диалог с этим NPC (false — сюжетная ветка временно отключена). */
+  public readonly isInteractive: boolean;
 
   /** Текст-подсказка "Нажать E", отображаемый, когда игрок рядом. */
   private readonly promptText: Phaser.GameObjects.Text;
@@ -24,9 +35,10 @@ export class NPC extends Phaser.GameObjects.Container {
    * @param scene сцена, в которой размещается NPC
    * @param x координата X
    * @param y координата Y
-   * @param npcId уникальный идентификатор NPC (например, "max")
+   * @param npcId уникальный технический идентификатор NPC (например, "max")
    * @param assetKey ключ визуального плейсхолдера в assetManifest.ts
    * @param dialogueStoryPath идентификатор диалогового сценария (ключ в реестре историй)
+   * @param isInteractive можно ли сейчас начать диалог с этим NPC (по умолчанию true)
    */
   public constructor(
     scene: Phaser.Scene,
@@ -35,13 +47,16 @@ export class NPC extends Phaser.GameObjects.Container {
     npcId: string,
     assetKey: AssetManifestKey,
     dialogueStoryPath: string,
+    isInteractive = true,
   ) {
     super(scene, x, y);
 
     this.npcId = npcId;
     this.dialogueStoryPath = dialogueStoryPath;
+    this.isInteractive = isInteractive;
 
     const descriptor = ASSET_MANIFEST[assetKey];
+    this.displayName = descriptor.label;
 
     const bodyRect = scene.add.rectangle(0, 0, descriptor.width, descriptor.height, descriptor.color);
     bodyRect.setStrokeStyle(2, 0xffffff, 0.5);
@@ -68,6 +83,12 @@ export class NPC extends Phaser.GameObjects.Container {
     this.add([bodyRect, nameLabel, this.promptText]);
     this.setSize(descriptor.width, descriptor.height);
 
+    if (!this.isInteractive) {
+      // Притушиваем весь контейнер целиком (тело + подпись), чтобы игрок
+      // визуально считывал: с этим персонажем сейчас нельзя поговорить.
+      this.setAlpha(NPC_DISABLED_ALPHA);
+    }
+
     scene.add.existing(this);
     // Статичное физическое тело: NPC не двигается, но блокирует проход игроку.
     scene.physics.add.existing(this, true);
@@ -84,9 +105,12 @@ export class NPC extends Phaser.GameObjects.Container {
 
   /**
    * Показывает или скрывает подсказку "Нажать E" над головой NPC.
+   * Для неинтерактивных NPC подсказка не показывается никогда, независимо
+   * от переданного значения visible — это защита от забытых проверок флага
+   * isInteractive в вызывающем коде (HubScene).
    * @param visible показать ли подсказку
    */
   public setPromptVisible(visible: boolean): void {
-    this.promptText.setVisible(visible);
+    this.promptText.setVisible(visible && this.isInteractive);
   }
 }

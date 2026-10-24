@@ -6,14 +6,19 @@ import { ASSET_MANIFEST } from '../config/assetManifest';
  * Управляемый игроком персонаж.
  *
  * Визуально представлен прямоугольником-плейсхолдером (см. assetManifest.ts).
- * Когда появятся настоящие спрайт-анимации, здесь достаточно заменить
- * создание Rectangle на this.scene.add.sprite(...) с ключом из
+ * Когда появятся настоящие спрайт-анимации, здесь достаточно заполнить
  * ASSET_MANIFEST['player'].spriteSheetPath — остальная логика движения
  * и физики не изменится.
  */
 export class Player extends Phaser.GameObjects.Container {
   /** Клавиши WASD, дублирующие стрелки для управления движением. */
   private readonly wasdKeys: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
+
+  /**
+   * Ссылка на спрайт персонажа, если используется реальный спрайт-лист
+   * (а не прямоугольник-плейсхолдер). Остаётся null, пока текстуры нет.
+   */
+  private spriteRef: Phaser.GameObjects.Sprite | null = null;
 
   /**
    * @param scene сцена, которой принадлежит игрок
@@ -28,21 +33,21 @@ export class Player extends Phaser.GameObjects.Container {
     const hasRealSprite = descriptor.spriteSheetPath !== null
       && scene.textures.exists(descriptor.spriteSheetPath);
 
-    let bodyVisual: Phaser.GameObjects.GameObject;
+    // Ровно один визуальный объект тела персонажа: либо реальный спрайт
+    // (если текстура уже загружена), либо прямоугольник-плейсхолдер.
+    // (Раньше здесь ошибочно создавались оба объекта одновременно.)
+    let bodyVisual: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Sprite;
 
     if (hasRealSprite) {
       const sprite = scene.add.sprite(0, 0, descriptor.spriteSheetPath as string, 0);
       this.ensureWalkAnimations(scene, descriptor.spriteSheetPath as string);
+      this.spriteRef = sprite;
       bodyVisual = sprite;
-      this.spriteRef = sprite; // сохраняем ссылку, чтобы переключать анимацию в update()
     } else {
       const rect = scene.add.rectangle(0, 0, descriptor.width, descriptor.height, descriptor.color);
       rect.setStrokeStyle(2, 0xffffff, 0.6);
       bodyVisual = rect;
     }
-
-    const bodyRect = scene.add.rectangle(0, 0, descriptor.width, descriptor.height, descriptor.color);
-    bodyRect.setStrokeStyle(2, 0xffffff, 0.6);
 
     const label = scene.add.text(0, 0, descriptor.label, {
       fontFamily: 'monospace',
@@ -52,7 +57,7 @@ export class Player extends Phaser.GameObjects.Container {
     label.setOrigin(0.5, 0.5);
     label.setY(-descriptor.height / 2 - 10);
 
-    this.add([bodyRect, label]);
+    this.add([bodyVisual, label]);
     this.setSize(descriptor.width, descriptor.height);
 
     scene.add.existing(this);
@@ -66,6 +71,20 @@ export class Player extends Phaser.GameObjects.Container {
       'W' | 'A' | 'S' | 'D',
       Phaser.Input.Keyboard.Key
     >;
+  }
+
+  /**
+   * Точка расширения под анимации ходьбы по спрайт-листу. Пока реального
+   * спрайта нет (hasRealSprite всегда false), тело метода не выполняется —
+   * оставлен как заготовка на момент появления реальной графики персонажа.
+   * @param scene сцена, которой принадлежит игрок
+   * @param textureKey ключ текстуры спрайт-листа в кэше Phaser
+   */
+  private ensureWalkAnimations(scene: Phaser.Scene, textureKey: string): void {
+    void scene;
+    void textureKey;
+    // TODO: реализовать вместе с добавлением реального спрайт-листа игрока
+    // (см. таблицу масштабов: 128x192, 4 кадра x 32px, 4 направления x 48px).
   }
 
   /**
@@ -102,5 +121,16 @@ export class Player extends Phaser.GameObjects.Container {
     if (velocityX !== 0 || velocityY !== 0) {
       body.velocity.normalize().scale(PLAYER_SPEED);
     }
+  }
+    /**
+   * Принудительно останавливает игрока (обнуляет скорость), не читая ввод
+   * с клавиатуры. Используется HubScene, когда управление временно
+   * отключено (идёт диалог или мини-игра), чтобы персонаж не продолжал
+   * "ехать" с последней ненулевой скоростью, если контролы отключили
+   * прямо в момент движения.
+   */
+  public stopMovement(): void {
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setVelocity(0, 0);
   }
 }

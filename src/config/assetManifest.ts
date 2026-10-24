@@ -55,7 +55,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     color: COLOR_NPC_MAX,
     width: 30,
     height: 38,
-    label: 'Макс',
+    label: 'Мася',
     spriteSheetPath: null,
   },
   npc_nastya: {
@@ -63,7 +63,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     color: COLOR_NPC_NASTYA,
     width: 30,
     height: 38,
-    label: 'Настя',
+    label: 'Рома',
     spriteSheetPath: null,
   },
   npc_lena: {
@@ -71,7 +71,7 @@ export const ASSET_MANIFEST: Record<string, PlaceholderVisualDescriptor> = {
     color: COLOR_NPC_LENA,
     width: 30,
     height: 38,
-    label: 'Лена',
+    label: 'Юни',
     spriteSheetPath: null,
   },
 };

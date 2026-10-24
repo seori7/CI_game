@@ -5,6 +5,7 @@ import {
   COLOR_FLOOR,
   COLOR_TEXT_PRIMARY,
   COLOR_WALL,
+  GAME_HEIGHT,
   GAME_WIDTH,
   HUB_ROOM_HEIGHT_TILES,
   HUB_ROOM_WIDTH_TILES,
@@ -34,10 +35,22 @@ const MINIGAME_SCENE_BY_TYPE: Record<MinigameType, string> = {
 /**
  * Главная сцена-хаб: комната, по которой игрок перемещается и может
  * подойти к одному из трёх NPC, чтобы начать диалог (а из диалога —
- * попасть в соответствующую мини-игру). Хаб никогда не останавливается
- * полностью — во время диалога/мини-игры он приостанавливается
- * (scene.pause) и затем возобновляется (scene.resume), сохраняя своё
- * состояние (позицию игрока и т.д.).
+ * попасть в соответствующую мини-игру).
+ *
+ * ВАЖНО: HubScene сама никогда не ставится на паузу через scene.pause().
+ * Раньше так и было сделано, но связка "пауза -> наложенная сцена диалога
+ * -> наложенная сцена мини-игры -> асинхронный resume()" в Phaser 4
+ * иногда приводила к тому, что после возврата в хаб update() не оживал
+ * как надо, и игрок не мог двигаться. Вместо этого используется свой
+ * явный флаг controlsEnabled: HubScene продолжает тикать всегда, но пока
+ * флаг выключен, игрок принудительно останавливается и не реагирует на
+ * клавиши, а проверка близости NPC не выполняется. Это полностью
+ * предсказуемо и не зависит от внутренней механики Scene Manager.
+ *
+ * Комната (640x384 px) меньше игрового канваса (960x540 px), поэтому вся
+ * геометрия рисуется со смещением roomOffsetX/roomOffsetY, чтобы оказаться
+ * по центру экрана. Камера при этом не скроллится — комната целиком
+ * помещается в кадр.
  */
 export class HubScene extends Phaser.Scene {
   private player!: Player;
@@ -47,6 +60,19 @@ export class HubScene extends Phaser.Scene {
   private nearbyNpc: NPC | null = null;
   private hintText!: Phaser.GameObjects.Text;
 
+  /** Смещение комнаты по X относительно канваса (для центрирования). */
+  private roomOffsetX = 0;
+  /** Смещение комнаты по Y относительно канваса (для центрирования). */
+  private roomOffsetY = 0;
+
+  /**
+   * Включено ли сейчас управление игроком. Выключается на время диалога
+   * и мини-игры, включается обратно при возврате в хаб. Это единственный
+   * источник истины для "можно ли сейчас ходить" — НЕ полагаемся на
+   * Phaser scene.isPaused()/isActive() для этой цели.
+   */
+  private controlsEnabled = true;
+
   /** Обработчик события 'dialogue-complete', сохранённый для корректной отписки. */
   private readonly onDialogueComplete = (payload: DialogueCompletePayload): void => {
     this.handleDialogueComplete(payload);
@@ -55,6 +81,11 @@ export class HubScene extends Phaser.Scene {
   /** Обработчик события 'minigame-complete', сохранённый для корректной отписки. */
   private readonly onMinigameComplete = (result: MinigameResult): void => {
     void this.handleMinigameComplete(result);
+  };
+
+  /** Обработчик события 'minigame-exit' (досрочный выход игрока без результата). */
+  private readonly onMinigameExit = (): void => {
+    this.handleMinigameExit();
   };
 
   public constructor() {
@@ -84,6 +115,7 @@ export class HubScene extends Phaser.Scene {
     // отдельные сцены, не имеющие прямого доступа к this.events HubScene.
     this.game.events.on('dialogue-complete', this.onDialogueComplete);
     this.game.events.on('minigame-complete', this.onMinigameComplete);
+    this.game.events.on('minigame-exit', this.onMinigameExit);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.detachGlobalListeners());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.detachGlobalListeners());
@@ -93,63 +125,139 @@ export class HubScene extends Phaser.Scene {
   private detachGlobalListeners(): void {
     this.game.events.off('dialogue-complete', this.onDialogueComplete);
     this.game.events.off('minigame-complete', this.onMinigameComplete);
+    this.game.events.off('minigame-exit', this.onMinigameExit);
   }
 
-  /** Рисует пол и стены комнаты через Graphics и расставляет статичные коллайдеры стен. */
+  /**
+   * Рисует пол и стены комнаты через Graphics и расставляет статичные
+   * коллайдеры стен. Вся геометрия смещена на roomOffsetX/roomOffsetY,
+   * чтобы комната оказалась по центру канваса GAME_WIDTH x GAME_HEIGHT.
+   */
   private buildRoom(): void {
     const roomWidth = HUB_ROOM_WIDTH_TILES * TILE_SIZE;
     const roomHeight = HUB_ROOM_HEIGHT_TILES * TILE_SIZE;
 
+    this.roomOffsetX = (GAME_WIDTH - roomWidth) / 2;
+    this.roomOffsetY = (GAME_HEIGHT - roomHeight) / 2;
+
     const graphics = this.add.graphics();
     graphics.fillStyle(COLOR_FLOOR, 1);
-    graphics.fillRect(0, 0, roomWidth, roomHeight);
+    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, roomHeight);
 
     graphics.fillStyle(COLOR_WALL, 1);
-    graphics.fillRect(0, 0, roomWidth, WALL_THICKNESS); // верхняя стена
-    graphics.fillRect(0, roomHeight - WALL_THICKNESS, roomWidth, WALL_THICKNESS); // нижняя стена
-    graphics.fillRect(0, 0, WALL_THICKNESS, roomHeight); // левая стена
-    graphics.fillRect(roomWidth - WALL_THICKNESS, 0, WALL_THICKNESS, roomHeight); // правая стена
+    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, roomWidth, WALL_THICKNESS); // верхняя стена
+    graphics.fillRect(
+      this.roomOffsetX,
+      this.roomOffsetY + roomHeight - WALL_THICKNESS,
+      roomWidth,
+      WALL_THICKNESS,
+    ); // нижняя стена
+    graphics.fillRect(this.roomOffsetX, this.roomOffsetY, WALL_THICKNESS, roomHeight); // левая стена
+    graphics.fillRect(
+      this.roomOffsetX + roomWidth - WALL_THICKNESS,
+      this.roomOffsetY,
+      WALL_THICKNESS,
+      roomHeight,
+    ); // правая стена
 
     const walls = this.physics.add.staticGroup();
     walls.add(
-      this.add.rectangle(roomWidth / 2, WALL_THICKNESS / 2, roomWidth, WALL_THICKNESS).setVisible(false),
-    );
-    walls.add(
       this.add
-        .rectangle(roomWidth / 2, roomHeight - WALL_THICKNESS / 2, roomWidth, WALL_THICKNESS)
+        .rectangle(
+          this.roomOffsetX + roomWidth / 2,
+          this.roomOffsetY + WALL_THICKNESS / 2,
+          roomWidth,
+          WALL_THICKNESS,
+        )
         .setVisible(false),
     );
     walls.add(
-      this.add.rectangle(WALL_THICKNESS / 2, roomHeight / 2, WALL_THICKNESS, roomHeight).setVisible(false),
+      this.add
+        .rectangle(
+          this.roomOffsetX + roomWidth / 2,
+          this.roomOffsetY + roomHeight - WALL_THICKNESS / 2,
+          roomWidth,
+          WALL_THICKNESS,
+        )
+        .setVisible(false),
     );
     walls.add(
       this.add
-        .rectangle(roomWidth - WALL_THICKNESS / 2, roomHeight / 2, WALL_THICKNESS, roomHeight)
+        .rectangle(
+          this.roomOffsetX + WALL_THICKNESS / 2,
+          this.roomOffsetY + roomHeight / 2,
+          WALL_THICKNESS,
+          roomHeight,
+        )
+        .setVisible(false),
+    );
+    walls.add(
+      this.add
+        .rectangle(
+          this.roomOffsetX + roomWidth - WALL_THICKNESS / 2,
+          this.roomOffsetY + roomHeight / 2,
+          WALL_THICKNESS,
+          roomHeight,
+        )
         .setVisible(false),
     );
 
     this.physics.world.setBounds(
-      WALL_THICKNESS,
-      WALL_THICKNESS,
+      this.roomOffsetX + WALL_THICKNESS,
+      this.roomOffsetY + WALL_THICKNESS,
       roomWidth - WALL_THICKNESS * 2,
       roomHeight - WALL_THICKNESS * 2,
     );
 
-    this.cameras.main.setBounds(0, 0, roomWidth, roomHeight);
+    // Камера намеренно не скроллится: комната целиком помещается в кадр
+    // GAME_WIDTH x GAME_HEIGHT, поэтому отдельных границ камеры и слежения
+    // за игроком (startFollow) не требуется.
   }
 
-  /** Создаёт игрока в нижней части комнаты и трёх NPC по фиксированным координатам в углах. */
+  /**
+   * Создаёт игрока в нижней части комнаты и трёх NPC по фиксированным
+   * координатам в углах. Рома (строитель) и Юни (медик) создаются
+   * неинтерактивными (isInteractive = false) — фокус текущей версии игры
+   * на Масе (программист).
+   */
   private spawnPlayerAndNpcs(): void {
     const roomWidth = HUB_ROOM_WIDTH_TILES * TILE_SIZE;
     const roomHeight = HUB_ROOM_HEIGHT_TILES * TILE_SIZE;
 
-    this.player = new Player(this, roomWidth / 2, roomHeight - TILE_SIZE * 2);
-    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+    this.player = new Player(
+      this,
+      this.roomOffsetX + roomWidth / 2,
+      this.roomOffsetY + roomHeight - TILE_SIZE * 2,
+    );
 
     this.npcList = [
-      new NPC(this, TILE_SIZE * 2.5, TILE_SIZE * 2.5, 'max', 'npc_max', 'max'),
-      new NPC(this, roomWidth - TILE_SIZE * 2.5, TILE_SIZE * 2.5, 'nastya', 'npc_nastya', 'nastya'),
-      new NPC(this, roomWidth - TILE_SIZE * 2.5, roomHeight - TILE_SIZE * 2.5, 'lena', 'npc_lena', 'lena'),
+      new NPC(
+        this,
+        this.roomOffsetX + TILE_SIZE * 2.5,
+        this.roomOffsetY + TILE_SIZE * 2.5,
+        'max',
+        'npc_max',
+        'max',
+        true,
+      ),
+      new NPC(
+        this,
+        this.roomOffsetX + roomWidth - TILE_SIZE * 2.5,
+        this.roomOffsetY + TILE_SIZE * 2.5,
+        'nastya',
+        'npc_nastya',
+        'nastya',
+        false,
+      ),
+      new NPC(
+        this,
+        this.roomOffsetX + roomWidth - TILE_SIZE * 2.5,
+        this.roomOffsetY + roomHeight - TILE_SIZE * 2.5,
+        'lena',
+        'npc_lena',
+        'lena',
+        false,
+      ),
     ];
 
     for (const npc of this.npcList) {
@@ -157,8 +265,18 @@ export class HubScene extends Phaser.Scene {
     }
   }
 
-  /** Жизненный цикл Phaser: обновление движения игрока и проверка близости к NPC. */
+  /**
+   * Жизненный цикл Phaser: HubScene тикает всегда (не ставится на паузу).
+   * Пока controlsEnabled === false (идёт диалог или мини-игра), игрок
+   * принудительно останавливается и не реагирует на клавиши, проверка
+   * близости NPC не выполняется.
+   */
   public override update(): void {
+    if (!this.controlsEnabled) {
+      this.player.stopMovement();
+      return;
+    }
+
     this.player.update(this.cursorKeys);
     this.updateNearbyNpc();
 
@@ -167,14 +285,19 @@ export class HubScene extends Phaser.Scene {
     }
   }
 
-  /** Определяет, находится ли игрок рядом с каким-либо NPC, и обновляет подсказки. */
+  /**
+   * Определяет, находится ли игрок рядом с каким-либо NPC, и обновляет
+   * подсказки. Неинтерактивные NPC (Рома, Юни) никогда не становятся
+   * nearbyNpc — рядом с ними не показывается подсказка и не срабатывает E,
+   * даже если игрок физически стоит в радиусе.
+   */
   private updateNearbyNpc(): void {
     let foundNpc: NPC | null = null;
 
     for (const npc of this.npcList) {
       const inRange = npc.isPlayerInRange(this.player);
       npc.setPromptVisible(inRange);
-      if (inRange) {
+      if (inRange && npc.isInteractive) {
         foundNpc = npc;
       }
     }
@@ -183,22 +306,24 @@ export class HubScene extends Phaser.Scene {
     this.updateHintText();
   }
 
-  /** Обновляет текст подсказки в верхней части экрана. */
+  /** Обновляет текст подсказки в верхней части экрана, используя человекочитаемое имя NPC. */
   private updateHintText(): void {
     if (this.nearbyNpc !== null) {
-      this.hintText.setText(`Нажми E, чтобы поговорить с ${this.nearbyNpc.npcId}`);
+      this.hintText.setText(`Нажми E, чтобы поговорить с ${this.nearbyNpc.displayName}`);
     } else {
       this.hintText.setText('Подойди к персонажу и нажми E, чтобы начать диалог');
     }
   }
 
   /**
-   * Запускает диалог с указанным NPC: приостанавливает хаб (не останавливает,
-   * чтобы сохранить состояние) и запускает DialogueScene поверх.
+   * Запускает диалог с указанным NPC: отключает управление игроком и
+   * запускает DialogueScene поверх хаба (сам хаб продолжает тикать, но
+   * игрок "заморожен" флагом controlsEnabled — см. update()).
    * @param npc NPC, с которым начинается диалог
    */
   private startDialogue(npc: NPC): void {
-    this.scene.pause();
+    this.controlsEnabled = false;
+    this.hintText.setText('');
     this.scene.launch('DialogueScene', {
       npcId: npc.npcId,
       dialogueStoryPath: npc.dialogueStoryPath,
@@ -207,7 +332,8 @@ export class HubScene extends Phaser.Scene {
 
   /**
    * Обрабатывает завершение диалога: если ink-сценарий запросил мини-игру —
-   * запускает соответствующую сцену, иначе просто возобновляет хаб.
+   * запускает соответствующую сцену (управление остаётся выключенным),
+   * иначе возвращает управление игроку.
    * @param payload данные события 'dialogue-complete'
    */
   private handleDialogueComplete(payload: DialogueCompletePayload): void {
@@ -215,13 +341,13 @@ export class HubScene extends Phaser.Scene {
       const sceneKey = MINIGAME_SCENE_BY_TYPE[payload.minigameToLaunch];
       this.scene.launch(sceneKey);
     } else {
-      this.scene.resume();
+      this.controlsEnabled = true;
     }
   }
 
   /**
    * Обрабатывает завершение мини-игры: отправляет результат в бэкенд,
-   * обновляет и сохраняет прогресс игрока, затем возобновляет хаб.
+   * обновляет и сохраняет прогресс игрока, затем возвращает управление.
    * @param result результат прохождения мини-игры
    */
   private async handleMinigameComplete(result: MinigameResult): Promise<void> {
@@ -248,6 +374,16 @@ export class HubScene extends Phaser.Scene {
     gameState.setProgress(progress);
     await saveProgress(progress);
 
-    this.scene.resume();
+    this.controlsEnabled = true;
+  }
+
+  /**
+   * Обрабатывает досрочный выход игрока из мини-игры (клавиша Esc/кнопка
+   * "Выйти"): никакой результат не сохраняется и не отправляется на
+   * бэкенд — это осознанный отказ от попытки, а не провал. Просто
+   * возвращаем управление игроку.
+   */
+  private handleMinigameExit(): void {
+    this.controlsEnabled = true;
   }
 }

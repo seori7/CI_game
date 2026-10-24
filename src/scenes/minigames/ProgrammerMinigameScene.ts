@@ -34,10 +34,21 @@ interface ParcelSlot {
 const MIN_PARCEL_WEIGHT = 1;
 const MAX_PARCEL_WEIGHT = 99;
 
+/** Геометрия кнопки досрочного выхода из мини-игры. */
+const EXIT_BUTTON_WIDTH = 160;
+const EXIT_BUTTON_HEIGHT = 32;
+const EXIT_BUTTON_X = 24 + EXIT_BUTTON_WIDTH / 2;
+const EXIT_BUTTON_Y = 54;
+
 /**
  * Мини-игра "Программист": нужно отсортировать 5 посылок по возрастанию
  * веса, перетаскивая блоки в слоты мышью. Таймер обратного отсчёта
  * постоянно поднимает уровень стресса, создавая игровое давление.
+ *
+ * Игрок может в любой момент выйти из мини-игры досрочно (клавиша Esc
+ * или кнопка в углу экрана) — это эмитит 'minigame-exit' вместо
+ * 'minigame-complete': результат не сохраняется, стресс не засчитывается,
+ * это осознанный отказ от попытки, а не провал.
  */
 export class ProgrammerMinigameScene extends Phaser.Scene {
   private blocks: ParcelBlock[] = [];
@@ -51,6 +62,9 @@ export class ProgrammerMinigameScene extends Phaser.Scene {
   private timerText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
   private countdownTimer: Phaser.Time.TimerEvent | null = null;
+
+  /** Клавиша Esc для досрочного выхода из мини-игры. */
+  private exitKey!: Phaser.Input.Keyboard.Key;
 
   public constructor() {
     super('ProgrammerMinigameScene');
@@ -66,10 +80,18 @@ export class ProgrammerMinigameScene extends Phaser.Scene {
 
     this.buildBackground();
     this.buildHud();
+    this.buildExitControl();
     this.buildSlots();
     this.buildBlocks();
     this.setupDragHandlers();
     this.startCountdown();
+  }
+
+  /** Жизненный цикл Phaser: проверка нажатия Esc каждый кадр. */
+  public override update(): void {
+    if (Phaser.Input.Keyboard.JustDown(this.exitKey)) {
+      this.exitToHub();
+    }
   }
 
   /** Рисует фон и заголовок мини-игры. */
@@ -117,6 +139,42 @@ export class ProgrammerMinigameScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5);
 
     this.updateTimerText();
+  }
+
+  /**
+   * Создаёт клавишу Esc и видимую кнопку "Выйти" в углу экрана — игрок
+   * может прервать мини-игру в любой момент без штрафа.
+   */
+  private buildExitControl(): void {
+    this.exitKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+
+    const rect = this.add
+      .rectangle(EXIT_BUTTON_X, EXIT_BUTTON_Y, EXIT_BUTTON_WIDTH, EXIT_BUTTON_HEIGHT, 0x374151)
+      .setStrokeStyle(1, 0x9ca3af);
+    const text = this.add
+      .text(EXIT_BUTTON_X, EXIT_BUTTON_Y, 'Esc — выйти в хаб', {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#e5e7eb',
+      })
+      .setOrigin(0.5, 0.5);
+
+    rect.setInteractive({ useHandCursor: true });
+    rect.on('pointerover', () => rect.setFillStyle(0x4b5563));
+    rect.on('pointerout', () => rect.setFillStyle(0x374151));
+    rect.on('pointerdown', () => this.exitToHub());
+    // Текст кнопки статичен и не требует обновления — хранить ссылку не нужно.
+    void text;
+  }
+
+  /**
+   * Прерывает мини-игру по желанию игрока: без результата и без штрафа
+   * стресса (это отказ от попытки, а не провал).
+   */
+  private exitToHub(): void {
+    this.countdownTimer?.remove();
+    this.game.events.emit('minigame-exit');
+    this.scene.stop();
   }
 
   /** Создаёт 5 пустых слотов-контейнеров, в которые нужно разложить блоки по порядку. */
