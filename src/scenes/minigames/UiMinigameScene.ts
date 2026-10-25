@@ -1471,7 +1471,7 @@ export class UiMinigameScene extends Phaser.Scene {
       .setDepth(301);
 
     const finishButton = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70, 'Завершить', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70, 'Далее', {
         fontSize: '18px',
         color: '#0f172a',
         backgroundColor: '#4ade80',
@@ -1484,11 +1484,16 @@ export class UiMinigameScene extends Phaser.Scene {
     finishButton.on('pointerdown', () => {
       this.fadeOutAndStop(() => {
         this.game.events.emit('minigame-complete', {
-          minigameType: 'builder',
+          minigameType: 'programmer',
           score,
           attempts: this.attempts,
           stressLevel: this.stressLevel,
           difficulty: 'hard',
+        });
+        this.scene.launch('MasyaOutroScene', {
+          score,
+          attempts: this.attempts,
+          stressLevel: this.stressLevel,
         });
         this.scene.stop();
       });

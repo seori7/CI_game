@@ -11,6 +11,7 @@ import { CatalogScene } from '../scenes/CatalogScene';
 import { UiMinigameScene } from '../scenes/minigames/UiMinigameScene';
 import { DroneMinigameScene } from '../scenes/minigames/DroneMinigameScene';
 import { MasyaIntroScene } from '../scenes/dialogue/MasyaIntroScene'; 
+import { MasyaOutroScene } from '../scenes/dialogue/MasyaOutroScene';
 
 /**
  * Базовая конфигурация игры Phaser. Список сцен задаёт порядок их
@@ -45,6 +46,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     BuilderMinigameScene,
     CatalogScene,
     MasyaIntroScene,
+    MasyaOutroScene,
     UiMinigameScene,
     DroneMinigameScene,
   ],
