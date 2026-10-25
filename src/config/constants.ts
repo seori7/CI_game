@@ -204,18 +204,33 @@ export const COLOR_TEXT_MUTED = '#94a3b8';
 export const COLOR_TEXT_DANGER = '#fca5a5';
 
 // ---------------------------------------------------------------------------
-// Константы для Меню и UX/UI Мини-игры
+// Константы для Меню (COLOR_UI_* используются в CatalogScene — не трогать)
 // ---------------------------------------------------------------------------
 export const COLOR_UI_PRIMARY = 0x2563eb;
 export const COLOR_UI_SUCCESS = 0x16a34a;
 export const COLOR_UI_ERROR = 0xdc2626;
 
-export const UI_SLOT_WIDTH = 280;
-export const UI_SLOT_HEIGHT = 45; // Уменьшили, чтобы влезало до 6 слотов
-export const UI_SLOT_GAP = 8;
-export const UI_LEVEL_TIMES = [30, 40, 45];
-export const UI_STRESS_TICKS = [1.5, 1.8, 2.2];
-
+// ---------------------------------------------------------------------------
+// Константы мини-игры "Боссфайт: Чит Маси" (замена UX/UI-конструктора).
+// ---------------------------------------------------------------------------
+export const BOSS_BOX_WIDTH = 360;
+export const BOSS_BOX_HEIGHT = 300;
+export const BOSS_SOUL_SPEED = 220;          // пикселей в секунду
+export const BOSS_SOUL_RADIUS = 10;
+export const BOSS_BULLET_RADIUS = 9;
+export const BOSS_HIT_STRESS = 20;           // урон при попадании снаряда
+export const BOSS_CHEAT_SUCCESS_RELIEF = 10; // облегчение за верный чит-ввод
+export const BOSS_CHEAT_FAIL_STRESS = 15;    // штраф за неверный/просроченный чит-ввод
+export const BOSS_INVULNERABILITY_MS = 800;  // i-frames после попадания
+export const BOSS_WAVE_BREATHER_RELIEF = 15; // снижение стресса между волнами
+// --- Новые опасности: стены костей и гастер-бластеры ---
+export const BOSS_BONE_THICKNESS = 22;       // толщина сегмента стены костей
+export const BOSS_BONE_SPEED = 170;          // скорость движения стены, px/сек
+export const BOSS_BONE_GAP_SIZE = 90;        // размер прохода в стене, px
+export const BOSS_BLASTER_TELEGRAPH_MS = 850; // время предупреждения перед лучом
+export const BOSS_BLASTER_BEAM_MS = 300;      // время существования самого луча
+export const BOSS_BLASTER_THICKNESS = 55;     // толщина луча, px
+export const BOSS_CAPTION_FADE_MS = 2200;     // через сколько гаснет сноска с кодом
 // ---------------------------------------------------------------------------
 // Константы мини-игры "Алгоритмика" (Робот-курьер)
 // ---------------------------------------------------------------------------
@@ -223,6 +238,24 @@ export const DRONE_CELL_SIZE = 50;
 export const DRONE_SLOT_SIZE = 45;
 export const DRONE_LEVEL_TIMES = [30, 45, 50];
 export const DRONE_STRESS_TICKS = [1.2, 1.5, 2.0];
+// --- Верхняя диалоговая панель (портрет + печатающийся текст) --------------
+export const BOSS_TOP_PANEL_WIDTH = 560;
+export const BOSS_TOP_PANEL_HEIGHT = 120;
+export const BOSS_PORTRAIT_SIZE = 90;
+export const BOSS_TYPEWRITER_MS = 28;        // мс на один символ диалога
+export const BOSS_CODE_TYPEWRITER_MS = 14;   // мс на символ в окне автопилота (быстрее)
+
+// --- Цветные кости (аналог Sans blue/orange attacks) ------------------------
+export const BOSS_BONE_COLOR_NORMAL = 0xe2e8f0;
+export const BOSS_BONE_COLOR_BLUE = 0x60a5fa;
+export const BOSS_BONE_COLOR_ORANGE = 0xf97316;
+
+// --- Мини-игра "Печать слова" + автопилот-награда ---------------------------
+export const BOSS_WORD_CHALLENGE_RELIEF = 18;
+export const BOSS_WORD_CHALLENGE_FAIL_STRESS = 15;
+export const BOSS_AUTOPILOT_MS = 900;
+export const BOSS_ARENA_TOP_ROW_HEIGHT = 50; // резерв под заголовок/кнопку "Сдаться"
+export const BOSS_ARENA_FOOTER_HEIGHT = 50;  // резерв под статус-текст снизу
 
 /** Карты города (3 уровня). 0=пусто, 1=пробка, 2=Старт, 3=Финиш */
 export const DRONE_LEVEL_MAPS = [
