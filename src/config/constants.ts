@@ -235,7 +235,6 @@ export const BOSS_INVISIBLE_DURATION_MS = 1600;
 export const BOSS_LOOP_PATTERN_DURATION_MS = 1800;
 export const BOSS_SHIELD_DURATION_MS = 6000;
 export const BOSS_SHIELD_RING_COLOR = 0x34d399;
-export const BOSS_CHEAT_DECLARE_FREEZE_MS = 400;
 // ---------------------------------------------------------------------------
 // Константы мини-игры "Алгоритмика" (Робот-курьер)
 // ---------------------------------------------------------------------------
@@ -270,6 +269,24 @@ export const CHEAT_DEMO_THREAT_DISTANCE = 90;
 export const BOSS_INTRO_COUNTDOWN_MS = 3000;
 export const BOSS_BULLET_MAX_AGE_MS = 6000;
 export const BOSS_BEAT_SAFETY_TIMEOUT_MS = 9000;
+
+// Длина самого длинного чит-слова ("else") — размер скользящего буфера
+// последних введённых символов. Буфера такой длины достаточно, чтобы
+// проверить совпадение с окончанием любого из 4 слов (if/for/let/else).
+export const MAX_CHEAT_WORD_LENGTH = 4;
+
+// Пауза (мс) после срабатывания чита, в течение которой повторный ввод
+// игнорируется — защита от случайного двойного срабатывания из-за
+// "налезающих" друг на друга последних символов буфера.
+export const CHEAT_RETRIGGER_COOLDOWN_MS = 350;
+
+// Размер шрифта текста-награды (строка кода после успешного чита).
+// Раньше было 13px мелким текстом у полоски стресса — теперь крупно, сбоку.
+export const BOSS_REWARD_CAPTION_FONT_SIZE = '22px';
+
+// Сколько миллисекунд текст-награда держится на экране на полной
+// непрозрачности перед угасанием (раньше — захардкоженное число 1800).
+export const BOSS_REWARD_CAPTION_HOLD_MS = 3200;
 
 /** Карты города (3 уровня). 0=пусто, 1=пробка, 2=Старт, 3=Финиш */
 export const DRONE_LEVEL_MAPS = [

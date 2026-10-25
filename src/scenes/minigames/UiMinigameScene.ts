@@ -35,7 +35,6 @@ import {
   BOSS_LOOP_PATTERN_DURATION_MS,
   BOSS_SHIELD_DURATION_MS,
   BOSS_SHIELD_RING_COLOR,
-  BOSS_CHEAT_DECLARE_FREEZE_MS,
   BOSS_DIALOGUE_AUTO_ADVANCE_MS,
   BOSS_DIM_OVERLAY_ALPHA,
   BOSS_DIM_FADE_MS,
@@ -44,6 +43,10 @@ import {
   BOSS_BULLET_MAX_AGE_MS,
   BOSS_BEAT_SAFETY_TIMEOUT_MS,
   CHEAT_DEMO_THREAT_DISTANCE,
+  MAX_CHEAT_WORD_LENGTH,
+  CHEAT_RETRIGGER_COOLDOWN_MS,
+  BOSS_REWARD_CAPTION_FONT_SIZE,
+  BOSS_REWARD_CAPTION_HOLD_MS,
 } from '../../config/constants';
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -158,6 +161,8 @@ const CHEAT_ELSE: CheatDefinition = {
   rewardCodeLines: ['} else {', '  becomeIntangible();', '}'],
 };
 
+const ALL_CHEATS: CheatDefinition[] = [CHEAT_IF, CHEAT_FOR, CHEAT_LET, CHEAT_ELSE];
+
 /* ──────────────────────────────────────────────────────────────────────
  * Волны: последовательность "бит" вместо фиксированных таймингов.
  * Следующий бит стартует только когда зачищены опасности текущего
@@ -200,7 +205,8 @@ export class UiMinigameScene extends Phaser.Scene {
   private hasShield = false;
   private isExiting = false;
   private shieldRing?: Phaser.GameObjects.Arc;
-  private activeWordKeyHandler: ((event: KeyboardEvent) => void) | null = null;
+  private typedBuffer = '';
+  private isCheatOnCooldown = false;
 
   // ── UI ──
   private dimOverlay!: Phaser.GameObjects.Rectangle;
@@ -324,6 +330,8 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
   private resetState(): void {
+    this.typedBuffer = '';
+    this.isCheatOnCooldown = false;
     this.hazards = [];
     this.scheduledEvents = [];
     this.activeTypewriterTimers = [];
@@ -442,14 +450,17 @@ export class UiMinigameScene extends Phaser.Scene {
       .rectangle(bounds.x, barY, 0, STRESS_BAR_HEIGHT, 0xef4444)
       .setOrigin(0, 0.5);
 
+    const rewardX = bounds.x + bounds.width + 24;
+    const rewardWrapWidth = Math.max(140, GAME_WIDTH - rewardX - 24);
     this.captionText = this.add
-      .text(bounds.x + bounds.width, barY, '', {
-        fontSize: '13px',
+      .text(rewardX, bounds.y + bounds.height / 2, '', {
+        fontSize: BOSS_REWARD_CAPTION_FONT_SIZE,
+        fontFamily: 'monospace',
         color: '#4ade80',
-        align: 'right',
-        wordWrap: { width: 260 },
+        align: 'left',
+        wordWrap: { width: rewardWrapWidth },
       })
-      .setOrigin(1, 0.5)
+      .setOrigin(0, 0.5)
       .setAlpha(0);
   }
 
@@ -486,8 +497,38 @@ export class UiMinigameScene extends Phaser.Scene {
       if (event.repeat) return;
       this.exitToHub();
     });
+    this.input.keyboard!.on('keydown', this.handleGlobalTyping, this);
   }
+  private handleGlobalTyping = (event: KeyboardEvent): void => {
+  // Коды заблокированы на экранах победы/поражения и во время выхода из боя.
+    if (this.isCodeChallengeActive || this.isExiting) return;
+    if (this.isCheatOnCooldown) return;
 
+    const key = event.key.toLowerCase();
+  // Нас интересуют только одиночные буквы a-z — пробел, Escape, стрелки
+  // и прочие служебные клавиши не должны портить буфер.
+    if (key.length !== 1 || key < 'a' || key > 'z') return;
+
+    this.typedBuffer = (this.typedBuffer + key).slice(-MAX_CHEAT_WORD_LENGTH);
+
+  // Совпадение ищется по ОКОНЧАНИЮ буфера, поэтому слово, заканчивающееся
+  // на чит-слово (например, "before" оканчивается на "for"), тоже сработает —
+  // это ожидаемое поведение "печатных" механик, а не баг.
+    const matchedCheat = ALL_CHEATS.find((cheat) => this.typedBuffer.endsWith(cheat.keyword));
+    if (!matchedCheat) return;
+
+    this.typedBuffer = '';
+    this.triggerCheat(matchedCheat);
+  };
+
+/** Запускает эффект чита и включает короткую защиту от повторного срабатывания. */
+  private triggerCheat(def: CheatDefinition): void {
+    this.isCheatOnCooldown = true;
+    this.time.delayedCall(CHEAT_RETRIGGER_COOLDOWN_MS, () => {
+      this.isCheatOnCooldown = false;
+    });
+    this.runCheatEffect(def);
+  }
   /* ──────────────────────────────────────────────────────────────────
    * Диалоговая печать: скип анимации по первому пробелу, переход по второму,
    * авто-переход через BOSS_DIALOGUE_AUTO_ADVANCE_MS, если игрок не нажимал сам.
@@ -606,16 +647,9 @@ export class UiMinigameScene extends Phaser.Scene {
           }
         });
       } else {
-        this.showWordChallenge(beat.def);
+        this.runDialogueSequence(beat.def.introLines, () => this.advanceBeatQueue());
       }
     }
-
-  /** Вызывается самим эффектом чита, когда он закончился (см. ниже). */
-  private finishBeatAndContinue(): void {
-    this.clearCheatDemoThreat();
-    const event = this.time.delayedCall(BOSS_BEAT_BREATHER_MS, () => this.advanceBeatQueue());
-    this.scheduledEvents.push(event);
-  }
 
   private clearHazards(): void {
     this.scheduledEvents.forEach((event) => event.remove(false));
@@ -636,71 +670,6 @@ export class UiMinigameScene extends Phaser.Scene {
     }
   }
 
-  /* ──────────────────────────────────────────────────────────────────
-   * Механика "Напечатай слово" — без таймера, ждёт корректного ввода
-   * ────────────────────────────────────────────────────────────────── */
-
-  private showWordChallenge(def: CheatDefinition): void {
-    this.isCodeChallengeActive = true;
-    this.runDialogueSequence(def.introLines, () => this.openWordChallengeWindow(def));
-  }
-
-  private openWordChallengeWindow(def: CheatDefinition): void {
-    const word = def.keyword;
-    let typedCount = 0;
-
-    const windowWidth = 240;
-    const centerX = GAME_WIDTH / 2;
-    const centerY = GAME_HEIGHT / 2;
-
-    const container = this.add.container(centerX, centerY).setDepth(200);
-    const bg = this.add.rectangle(0, 0, windowWidth, 90, 0x111827, 0.92).setStrokeStyle(2, 0x60a5fa);
-    const prompt = this.add
-      .text(0, -22, 'Напечатай:', { fontSize: '14px', color: '#94a3b8' })
-      .setOrigin(0.5);
-
-    const letterTexts: Phaser.GameObjects.Text[] = [];
-    const letterSpacing = 22;
-    const startX = -((word.length - 1) * letterSpacing) / 2;
-    for (let i = 0; i < word.length; i += 1) {
-      const letterText = this.add
-        .text(startX + i * letterSpacing, 8, word[i], {
-          fontSize: '26px',
-          fontStyle: 'bold',
-          color: '#64748b',
-        })
-        .setOrigin(0.5);
-      letterTexts.push(letterText);
-    }
-
-    container.add([bg, prompt, ...letterTexts]);
-    container.setScale(0.3).setAlpha(0);
-    this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 220, ease: 'Back.easeOut' });
-
-    const cleanupChallenge = (): void => {
-      if (this.activeWordKeyHandler) {
-        window.removeEventListener('keydown', this.activeWordKeyHandler);
-        this.activeWordKeyHandler = null;
-      }
-      container.destroy();
-    };
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.repeat) return;
-      const expected = word[typedCount];
-      if (event.key.toLowerCase() === expected) {
-        letterTexts[typedCount].setColor('#4ade80');
-        typedCount += 1;
-        if (typedCount === word.length) {
-          cleanupChallenge();
-          this.runCheatEffect(def);
-        }
-      }
-    };
-
-    this.activeWordKeyHandler = onKeyDown;
-    window.addEventListener('keydown', onKeyDown);
-  }
 
   /* ──────────────────────────────────────────────────────────────────
    * Диспетчер эффектов чита
@@ -723,7 +692,7 @@ export class UiMinigameScene extends Phaser.Scene {
           this.captionTween = this.tweens.add({
             targets: this.captionText,
             alpha: 0,
-            delay: 1800,
+            delay: BOSS_REWARD_CAPTION_HOLD_MS,
             duration: BOSS_CAPTION_FADE_MS,
           });
         }
@@ -799,8 +768,9 @@ export class UiMinigameScene extends Phaser.Scene {
   // Демо-угроза нужна только эффектам, которые реально двигают точку
   // (if и for — уворот). Щиту (let) и неосязаемости (else) двигаться
   // не от чего, им демо-объект не нужен.
-    const needsDemoThreat = def.effect === 'dodge-if' || def.effect === 'loop-for';
-    if (needsDemoThreat) this.spawnCheatDemoThreat();
+    const needsDemoThreat =
+    (def.effect === 'dodge-if' || def.effect === 'loop-for') && this.hazards.length === 0;
+  if (needsDemoThreat) this.spawnCheatDemoThreat();
 
     switch (def.effect) {
       case 'dodge-if':
@@ -828,8 +798,7 @@ export class UiMinigameScene extends Phaser.Scene {
       duration: BOSS_AUTOPILOT_MS,
       ease: 'Sine.easeInOut',
       onComplete: () => {
-        this.isCodeChallengeActive = false;
-        this.finishBeatAndContinue();
+        this.clearCheatDemoThreat();
       },
     });
   }
@@ -837,9 +806,7 @@ export class UiMinigameScene extends Phaser.Scene {
   /** else — временная неосязаемость, управление возвращается сразу, бой не заморожен. */
   private playInvisibleElseEffect(): void {
     this.isInvisible = true;
-    this.isCodeChallengeActive = false;
     this.soul.setFillStyle(0x93c5fd, 1);
-
     const flicker = this.tweens.add({
       targets: this.soul,
       alpha: 0.35,
@@ -847,14 +814,11 @@ export class UiMinigameScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1,
     });
-
     this.time.delayedCall(BOSS_INVISIBLE_DURATION_MS, () => {
       flicker.stop();
       this.soul.setAlpha(1).setFillStyle(0xef4444, 1);
       this.isInvisible = false;
     });
-
-    this.finishBeatAndContinue();
   }
 
   /** for — несколько последовательных уворотов, каждый пересчитывает ближайшую угрозу заново. */
@@ -865,8 +829,7 @@ export class UiMinigameScene extends Phaser.Scene {
 
     const runStep = (): void => {
       if (step >= totalSteps) {
-        this.isCodeChallengeActive = false;
-        this.finishBeatAndContinue();
+        this.clearCheatDemoThreat();
         return;
       }
       step += 1;
@@ -887,22 +850,14 @@ export class UiMinigameScene extends Phaser.Scene {
   /** let — щит на один удар, управление возвращается почти сразу, бой не заморожен. */
   private playShieldLetEffect(): void {
     this.hasShield = true;
-
     const ring = this.add
       .circle(this.soul.x, this.soul.y, BOSS_SOUL_RADIUS + 6, BOSS_SHIELD_RING_COLOR, 0)
       .setStrokeStyle(3, BOSS_SHIELD_RING_COLOR, 1)
       .setScale(0.3)
       .setAlpha(0)
       .setDepth(150);
-
     this.tweens.add({ targets: ring, scale: 1, alpha: 1, duration: 250, ease: 'Back.easeOut' });
     this.shieldRing = ring;
-
-    this.time.delayedCall(BOSS_CHEAT_DECLARE_FREEZE_MS, () => {
-      this.isCodeChallengeActive = false;
-      this.finishBeatAndContinue();
-    });
-
     this.time.delayedCall(BOSS_SHIELD_DURATION_MS, () => {
       if (this.hasShield) this.consumeShield(false);
     });
@@ -1545,10 +1500,7 @@ export class UiMinigameScene extends Phaser.Scene {
    * ────────────────────────────────────────────────────────────────── */
 
   private cleanup(): void {
-    if (this.activeWordKeyHandler) {
-      window.removeEventListener('keydown', this.activeWordKeyHandler);
-      this.activeWordKeyHandler = null;
-    }
+    this.clearCheatDemoThreat();
     this.scheduledEvents.forEach((event) => event.remove(false));
     this.scheduledEvents = [];
     this.activeTypewriterTimers.forEach((timer) => timer.remove(false));
@@ -1560,6 +1512,7 @@ export class UiMinigameScene extends Phaser.Scene {
     this.shieldRing = undefined;
     this.isInvisible = false;
     this.hasShield = false;
+    this.input.keyboard?.off('keydown', this.handleGlobalTyping, this);
     this.input.keyboard?.removeAllListeners('keydown-SPACE');
     this.input.keyboard?.removeAllListeners('keydown-ESC');
   }
