@@ -191,6 +191,7 @@ export class UiMinigameScene extends Phaser.Scene {
   private currentWaveIndex = 0;
   private activeBeats: WaveBeat[] = [];
   private waitingForHazardClear = false;
+  private activeSafetyTimer?: Phaser.Time.TimerEvent;
   private isInvulnerable = false;
   private isCodeChallengeActive = false;
   private isInvisible = false;
@@ -579,6 +580,12 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
     private advanceBeatQueue(): void {
+  // Обязательно отменяем предыдущий страховочный таймер первым делом —
+  // иначе он может "выстрелить" позже по уже неактуальному, новому биту
+  // и ошибочно прервать его раньше времени (это и вызывало повтор заданий).
+      this.activeSafetyTimer?.remove(false);
+      this.activeSafetyTimer = undefined;
+
       if (this.activeBeats.length === 0) {
         this.startWave(this.currentWaveIndex + 1);
         return;
@@ -589,15 +596,13 @@ export class UiMinigameScene extends Phaser.Scene {
         beat.spawn();
         this.waitingForHazardClear = true;
 
-    // Страховка: если хазард почему-то не зачистился сам за 9 сек —
-    // не даём бою зависнуть навечно, принудительно очищаем и идём дальше.
-        const safetyEvent = this.time.delayedCall(BOSS_BEAT_SAFETY_TIMEOUT_MS, () => {
+        this.activeSafetyTimer = this.time.delayedCall(BOSS_BEAT_SAFETY_TIMEOUT_MS, () => {
           if (this.waitingForHazardClear) {
             this.clearHazards();
+            this.waitingForHazardClear = false;
             this.advanceBeatQueue();
           }
         });
-        this.scheduledEvents.push(safetyEvent);
       } else {
         this.showWordChallenge(beat.def);
       }

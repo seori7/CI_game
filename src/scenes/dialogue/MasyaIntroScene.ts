@@ -1,235 +1,199 @@
 import Phaser from 'phaser';
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  BOSS_TOP_PANEL_WIDTH,
-  BOSS_TOP_PANEL_HEIGHT,
-  BOSS_PORTRAIT_SIZE,
-  BOSS_TYPEWRITER_MS,
-  BOSS_INTRO_COUNTDOWN_MS,
-} from '../../config/constants';
+import { GAME_WIDTH, GAME_HEIGHT, BOSS_TYPEWRITER_MS, BOSS_INTRO_COUNTDOWN_MS } from '../../config/constants';
+
+// 👇 ЕСЛИ ХОЧЕШЬ ПОМЕНЯТЬ ТЕКСТ КНОПКИ — ПРАВЬ ТОЛЬКО ЭТУ СТРОКУ, БОЛЬШЕ НИЧЕГО ТРОГАТЬ НЕ НУЖНО
+const START_BUTTON_LABEL = 'Погнали, показывай!';
+
+type Stage = 'typing-lines' | 'awaiting-start' | 'countdown';
 
 export class MasyaIntroScene extends Phaser.Scene {
   private dialogueText!: Phaser.GameObjects.Text;
   private continueIndicator!: Phaser.GameObjects.Text;
-  private typewriterState: {
-    fullText: string;
-    timer?: Phaser.Time.TimerEvent;
-    isRunning: boolean;
-    onComplete?: () => void;
-  } = { fullText: '', isRunning: false };
+  private dimOverlay!: Phaser.GameObjects.Rectangle;
+  private startButton?: Phaser.GameObjects.Text;
+  private countdownLabel?: Phaser.GameObjects.Text;
+  private countdownEvent?: Phaser.Time.TimerEvent;
+  private typeTimer?: Phaser.Time.TimerEvent;
 
-  private readonly STORY_LINES = [
-    'Начинала я случайно — просто захотела собрать игру для друзей.',
-    'Потом втянулась: оказалось, что код — это просто чёткие правила, как читы.',
-    'Теперь пишу свой проект и обучаю таких, как ты!',
+  private stage: Stage = 'typing-lines';
+  private isTyping = false;
+  private fullText = '';
+  private lineIndex = 0;
+
+  // Это ПРЯМОЕ продолжение последней реплики ink-диалога
+  // ("Ладно, давай покажу, с чем реально приходится возиться каждый день").
+  // Никакой повторной биографии здесь нет — она уже рассказана в обычном диалоге.
+  private readonly INTRO_LINES = [
+    'Вот смотри: весь код держится на простых правилах — как читы в игре.',
+    'Сейчас покажу прямо на деле. Готов словить парочку?',
   ];
+
+  private readonly BOX_HEIGHT = 140;
+  private readonly BOX_PADDING = 24;
 
   public constructor() {
     super('MasyaIntroScene');
   }
 
   public create(): void {
-    const dimOverlay = this.add
-      .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6)
-      .setAlpha(0);
-    this.tweens.add({ targets: dimOverlay, alpha: 1, duration: 450 });
+    this.stage = 'typing-lines';
+    this.isTyping = false;
+    this.lineIndex = 0;
 
-    this.buildPanel();
-    this.runTypewriter(
-      'Мася стоит у окна и что-то обдумывает... Кажется, пишет свой личный проект.',
-      () => this.showMenu(),
-    );
+    this.buildDimOverlay();
+    this.buildBox();
+    this.registerInput();
 
-    this.input.keyboard!.on('keydown-SPACE', (event: KeyboardEvent) => {
-      if (event.repeat) return;
-      this.handleAdvance();
-    });
+    this.playCurrentLine();
+
+    this.events.once('shutdown', () => this.cleanup());
   }
 
-  private buildPanel(): void {
-    const panelX = GAME_WIDTH / 2;
-    const panelY = GAME_HEIGHT / 2 - 40;
+  private buildDimOverlay(): void {
+    this.dimOverlay = this.add
+      .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6)
+      .setAlpha(0)
+      .setDepth(-10);
+    this.tweens.add({ targets: this.dimOverlay, alpha: 1, duration: 450 });
+  }
+
+  private buildBox(): void {
+    const boxY = GAME_HEIGHT - this.BOX_HEIGHT / 2 - 12;
 
     this.add
-      .rectangle(panelX, panelY, BOSS_TOP_PANEL_WIDTH, BOSS_TOP_PANEL_HEIGHT, 0x0f172a, 0.95)
+      .rectangle(GAME_WIDTH / 2, boxY, GAME_WIDTH - 32, this.BOX_HEIGHT, 0x0f172a, 0.95)
       .setStrokeStyle(2, 0x334155)
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.handleAdvance());
 
-    const portraitX = panelX - BOSS_TOP_PANEL_WIDTH / 2 + BOSS_PORTRAIT_SIZE / 2 + 16;
+    this.add.text(this.BOX_PADDING + 16, boxY - this.BOX_HEIGHT / 2 + 14, 'МАСЯ', {
+      fontFamily: 'monospace',
+      fontSize: '14px',
+      color: '#4fd1c5',
+      fontStyle: 'bold',
+    });
 
-    if (this.textures.exists('npc_max')) {
-      this.add.image(portraitX, panelY, 'npc_max').setDisplaySize(BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE);
-    } else {
-      this.add.rectangle(portraitX, panelY, BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE, 0x7c3aed);
-      this.add.text(portraitX, panelY, 'М', { fontSize: '36px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    }
-
-    const textX = portraitX + BOSS_PORTRAIT_SIZE / 2 + 20;
     this.dialogueText = this.add
-      .text(textX, panelY - 16, '', {
-        fontSize: '16px',
+      .text(this.BOX_PADDING + 16, boxY - this.BOX_HEIGHT / 2 + 40, '', {
+        fontSize: '15px',
         color: '#e2e8f0',
-        wordWrap: { width: panelX + BOSS_TOP_PANEL_WIDTH / 2 - textX - 24 },
+        wordWrap: { width: GAME_WIDTH - 32 - this.BOX_PADDING * 2 - 16 },
       })
-      .setOrigin(0, 0.5);
+      .setOrigin(0, 0);
 
     this.continueIndicator = this.add
-      .text(panelX + BOSS_TOP_PANEL_WIDTH / 2 - 24, panelY + BOSS_TOP_PANEL_HEIGHT / 2 - 18, '▼', {
-        fontSize: '14px',
-        color: '#94a3b8',
-      })
+      .text(GAME_WIDTH - 32 - 16, boxY + this.BOX_HEIGHT / 2 - 20, '▼', { fontSize: '14px', color: '#94a3b8' })
       .setOrigin(0.5)
       .setVisible(false);
   }
 
-  private runTypewriter(text: string, onComplete: () => void): void {
+  private registerInput(): void {
+    this.input.keyboard!.on('keydown-SPACE', this.handleSpaceKey, this);
+  }
+
+  private handleSpaceKey = (event: KeyboardEvent): void => {
+    if (event.repeat) return;
+    if (this.stage === 'countdown') {
+      this.startFight();
+      return;
+    }
+    this.handleAdvance();
+  };
+
+  private cleanup(): void {
+    this.input.keyboard?.off('keydown-SPACE', this.handleSpaceKey, this);
+    this.typeTimer?.remove();
+    this.countdownEvent?.remove(false);
+  }
+
+  private playCurrentLine(): void {
+    const line = this.INTRO_LINES[this.lineIndex];
+    this.runTyping(line);
+  }
+
+  private runTyping(text: string): void {
+    this.typeTimer?.remove();
     this.dialogueText.setText('');
-    this.typewriterState.fullText = text;
-    this.typewriterState.isRunning = true;
-    this.typewriterState.onComplete = onComplete;
+    this.fullText = text;
+    this.isTyping = true;
     this.continueIndicator.setVisible(false);
 
     let charIndex = 0;
-    const timer = this.time.addEvent({
+    this.typeTimer = this.time.addEvent({
       delay: BOSS_TYPEWRITER_MS,
       loop: true,
       callback: () => {
         charIndex += 1;
         this.dialogueText.setText(text.slice(0, charIndex));
         if (charIndex >= text.length) {
-          timer.remove();
-          this.typewriterState.isRunning = false;
+          this.typeTimer?.remove();
+          this.isTyping = false;
           this.continueIndicator.setVisible(true);
         }
       },
     });
-    this.typewriterState.timer = timer;
   }
 
   private handleAdvance(): void {
-    if (this.typewriterState.isRunning) {
-      this.typewriterState.timer?.remove();
-      this.dialogueText.setText(this.typewriterState.fullText);
-      this.typewriterState.isRunning = false;
+    if (this.isTyping) {
+      this.typeTimer?.remove();
+      this.dialogueText.setText(this.fullText);
+      this.isTyping = false;
       this.continueIndicator.setVisible(true);
       return;
     }
-    const callback = this.typewriterState.onComplete;
-    this.typewriterState.onComplete = undefined;
-    this.continueIndicator.setVisible(false);
-    callback?.();
-  }
 
-  private showMenu(): void {
-    const askButton = this.add
-      .text(GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2 + 80, 'Как ты стала программистом?', {
-        fontSize: '14px',
-        color: '#0f172a',
-        backgroundColor: '#93c5fd',
-        padding: { x: 10, y: 6 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    const startButton = this.add
-      .text(GAME_WIDTH / 2 + 110, GAME_HEIGHT / 2 + 80, 'Начать бой', {
-        fontSize: '14px',
-        color: '#0f172a',
-        backgroundColor: '#4ade80',
-        padding: { x: 10, y: 6 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    askButton.on('pointerdown', () => {
-      askButton.destroy();
-      startButton.destroy();
-      this.runStorySequence(0);
-    });
-
-    startButton.on('pointerdown', () => {
-      askButton.destroy();
-      startButton.destroy();
-      this.runCountdown();
-    });
-  }
-
-  private runStorySequence(index: number): void {
-    if (index >= this.STORY_LINES.length) {
-      this.runCountdown();
+    this.lineIndex += 1;
+    if (this.lineIndex < this.INTRO_LINES.length) {
+      this.playCurrentLine();
       return;
     }
 
-    const container = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40).setScale(0.3).setAlpha(0);
-    const bg = this.add.rectangle(0, 0, 420, 90, 0x111827, 0.95).setStrokeStyle(2, 0x60a5fa);
-    const text = this.add
-      .text(0, 0, '', { fontSize: '15px', color: '#e2e8f0', align: 'center', wordWrap: { width: 380 } })
-      .setOrigin(0.5);
-    const hint = this.add.text(190, 34, '▼', { fontSize: '13px', color: '#94a3b8' }).setOrigin(0.5).setVisible(false);
-
-    container.add([bg, text, hint]);
-    this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 220, ease: 'Back.easeOut' });
-
-    const line = this.STORY_LINES[index];
-    let charIndex = 0;
-    let isRunning = true;
-
-    const timer = this.time.addEvent({
-      delay: BOSS_TYPEWRITER_MS,
-      loop: true,
-      callback: () => {
-        charIndex += 1;
-        text.setText(line.slice(0, charIndex));
-        if (charIndex >= line.length) {
-          timer.remove();
-          isRunning = false;
-          hint.setVisible(true);
-        }
-      },
-    });
-
-    const advance = (event: KeyboardEvent): void => {
-      if (event.repeat) return;
-      if (isRunning) {
-        timer.remove();
-        text.setText(line);
-        isRunning = false;
-        hint.setVisible(true);
-        return;
-      }
-      this.input.keyboard!.off('keydown-SPACE', advance);
-      container.destroy();
-      this.runStorySequence(index + 1);
-    };
-
-    this.input.keyboard!.on('keydown-SPACE', advance);
+    this.showStartButton();
   }
 
-  private runCountdown(): void {
-    const label = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40, 'Погнали? Бой начнётся через 3 секунды...\n[Пробел] — начать сразу', {
+  private showStartButton(): void {
+    this.stage = 'awaiting-start';
+    this.continueIndicator.setVisible(false);
+
+    this.startButton = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - this.BOX_HEIGHT - 34, START_BUTTON_LABEL, {
         fontSize: '14px',
+        color: '#0f172a',
+        backgroundColor: '#4ade80',
+        padding: { x: 14, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.startCountdown());
+  }
+
+  private startCountdown(): void {
+    this.startButton?.destroy();
+    this.startButton = undefined;
+    this.stage = 'countdown';
+
+    this.dialogueText.setText('Бой начнётся через 3 секунды...');
+
+    this.countdownLabel = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - this.BOX_HEIGHT - 34, '[Пробел] — начать сразу', {
+        fontSize: '13px',
         color: '#94a3b8',
-        align: 'center',
       })
       .setOrigin(0.5);
 
-    const countdownEvent = this.time.delayedCall(BOSS_INTRO_COUNTDOWN_MS, () => startFight());
+    this.countdownEvent = this.time.delayedCall(BOSS_INTRO_COUNTDOWN_MS, () => this.startFight());
+  }
 
-    const startFight = (): void => {
-      countdownEvent.remove(false);
-      this.input.keyboard!.off('keydown-SPACE', skipHandler);
-      label.destroy();
-      this.scene.stop();
-      this.scene.launch('UiMinigameScene');
-    };
+  private startFight(): void {
+    this.countdownEvent?.remove(false);
+    this.countdownLabel?.destroy();
 
-    const skipHandler = (event: KeyboardEvent): void => {
-      if (event.repeat) return;
-      startFight();
-    };
-    this.input.keyboard!.on('keydown-SPACE', skipHandler);
+    if (this.scene.isActive('UiMinigameScene')) {
+      this.scene.stop('UiMinigameScene');
+    }
+
+    this.scene.stop();
+    this.scene.launch('UiMinigameScene');
   }
 }
