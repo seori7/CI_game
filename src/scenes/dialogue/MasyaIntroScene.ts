@@ -64,7 +64,10 @@ export class MasyaIntroScene extends Phaser.Scene {
       .rectangle(GAME_WIDTH / 2, boxY, GAME_WIDTH - 32, this.BOX_HEIGHT, 0x0f172a, 0.95)
       .setStrokeStyle(2, 0x334155)
       .setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.handleAdvance());
+      .on('pointerdown', () => {
+        if (this.stage !== 'typing-lines') return;
+    this.handleAdvance();
+  });
 
     this.add.text(this.BOX_PADDING + 16, boxY - this.BOX_HEIGHT / 2 + 14, 'МАСЯ', {
       fontFamily: 'monospace',
@@ -135,6 +138,7 @@ export class MasyaIntroScene extends Phaser.Scene {
   }
 
   private handleAdvance(): void {
+    if (this.stage !== 'typing-lines') return;
     if (this.isTyping) {
       this.typeTimer?.remove();
       this.dialogueText.setText(this.fullText);
@@ -156,6 +160,8 @@ export class MasyaIntroScene extends Phaser.Scene {
     this.stage = 'awaiting-start';
     this.continueIndicator.setVisible(false);
 
+    this.startButton?.destroy();
+
     this.startButton = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - this.BOX_HEIGHT - 34, START_BUTTON_LABEL, {
         fontSize: '14px',
@@ -169,6 +175,7 @@ export class MasyaIntroScene extends Phaser.Scene {
   }
 
   private startCountdown(): void {
+    this.countdownEvent?.remove(false);
     this.startButton?.destroy();
     this.startButton = undefined;
     this.stage = 'countdown';

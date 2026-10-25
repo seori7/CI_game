@@ -43,6 +43,7 @@ import {
   BOSS_DODGE_PUSH_DISTANCE,
   BOSS_BULLET_MAX_AGE_MS,
   BOSS_BEAT_SAFETY_TIMEOUT_MS,
+  CHEAT_DEMO_THREAT_DISTANCE,
 } from '../../config/constants';
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ export class UiMinigameScene extends Phaser.Scene {
   private activeBeats: WaveBeat[] = [];
   private waitingForHazardClear = false;
   private activeSafetyTimer?: Phaser.Time.TimerEvent;
+  private cheatDemoHazard?: BulletHazard;
   private isInvulnerable = false;
   private isCodeChallengeActive = false;
   private isInvisible = false;
@@ -610,6 +612,7 @@ export class UiMinigameScene extends Phaser.Scene {
 
   /** Вызывается самим эффектом чита, когда он закончился (см. ниже). */
   private finishBeatAndContinue(): void {
+    this.clearCheatDemoThreat();
     const event = this.time.delayedCall(BOSS_BEAT_BREATHER_MS, () => this.advanceBeatQueue());
     this.scheduledEvents.push(event);
   }
@@ -729,9 +732,75 @@ export class UiMinigameScene extends Phaser.Scene {
     this.activeTypewriterTimers.push(timer);
   }
 
+  /**
+ * Создаёт статичный визуальный "снаряд" рядом с точкой перед тем, как
+ * сработает if/for. Он не двигается и не наносит урон (updateHazards()
+ * не выполняется, пока isCodeChallengeActive === true), нужен только
+ * чтобы computeDodgeTarget() имел реальную цель для уворота, а не
+ * fallback в центр арены при пустом this.hazards.
+ */
+  private spawnCheatDemoThreat(): void {
+    const bounds = this.arenaBounds;
+    // Случайное направление по каждой оси (влево/вправо, вверх/вниз),
+    // чтобы демо-угроза не появлялась каждый раз в одном и том же месте.
+    const dirX = Phaser.Math.Between(0, 1) === 0 ? -1 : 1;
+    const dirY = Phaser.Math.Between(0, 1) === 0 ? -1 : 1;
+
+    const x = Phaser.Math.Clamp(
+      this.soul.x + dirX * CHEAT_DEMO_THREAT_DISTANCE,
+      bounds.x + 20,
+      bounds.x + bounds.width - 20,
+    );
+    const y = Phaser.Math.Clamp(
+      this.soul.y + dirY * CHEAT_DEMO_THREAT_DISTANCE,
+      bounds.y + 20,
+      bounds.y + bounds.height - 20,
+    );
+
+    const obj = this.add.circle(x, y, BOSS_BULLET_RADIUS, 0xfbbf24, 0.85);
+
+  // Используем тип BulletHazard с нулевой скоростью — это просто
+  // статичная точка-ориентир, а не настоящий летящий снаряд.
+    const demo: BulletHazard = {
+      kind: 'bullet',
+      obj,
+      movement: 'straight',
+      age: 0,
+      baseVx: 0,
+      baseVy: 0,
+      vx: 0,
+      vy: 0,
+      sineAmplitude: 0,
+      sineFrequency: 0,
+    };
+
+    this.cheatDemoHazard = demo;
+    this.hazards.push(demo);
+  }
+
+/**
+ * Убирает демо-угрозу после того, как чит-эффект отыгран. Обязательно
+ * вызывать перед переходом к следующему биту — иначе демо-объект
+ * останется висеть в this.hazards и сломает проверку
+ * "waitingForHazardClear && hazards.length === 0" для следующего
+ * боевого бита (она никогда не станет true).
+ */
+  private clearCheatDemoThreat(): void {
+    if (!this.cheatDemoHazard) return;
+    this.cheatDemoHazard.obj.destroy();
+    this.hazards = this.hazards.filter((hazard) => hazard !== this.cheatDemoHazard);
+    this.cheatDemoHazard = undefined;
+  }
+
   private runCheatEffect(def: CheatDefinition): void {
     this.applyStressChange(-BOSS_WORD_CHALLENGE_RELIEF);
     this.printRewardCode(def.rewardCodeLines);
+
+  // Демо-угроза нужна только эффектам, которые реально двигают точку
+  // (if и for — уворот). Щиту (let) и неосязаемости (else) двигаться
+  // не от чего, им демо-объект не нужен.
+    const needsDemoThreat = def.effect === 'dodge-if' || def.effect === 'loop-for';
+    if (needsDemoThreat) this.spawnCheatDemoThreat();
 
     switch (def.effect) {
       case 'dodge-if':

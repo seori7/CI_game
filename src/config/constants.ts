@@ -266,6 +266,7 @@ export const BOSS_DIM_OVERLAY_ALPHA = 0.6;
 export const BOSS_DIM_FADE_MS = 450;
 export const BOSS_BEAT_BREATHER_MS = 450;
 export const BOSS_DODGE_PUSH_DISTANCE = 70;
+export const CHEAT_DEMO_THREAT_DISTANCE = 90;
 export const BOSS_INTRO_COUNTDOWN_MS = 3000;
 export const BOSS_BULLET_MAX_AGE_MS = 6000;
 export const BOSS_BEAT_SAFETY_TIMEOUT_MS = 9000;
