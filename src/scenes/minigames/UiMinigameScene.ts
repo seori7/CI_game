@@ -33,291 +33,281 @@ import {
   BOSS_AUTOPILOT_MS,
   BOSS_ARENA_TOP_ROW_HEIGHT,
   BOSS_ARENA_FOOTER_HEIGHT,
+  BOSS_INVISIBLE_DURATION_MS,
+  BOSS_LOOP_PATTERN_DURATION_MS,
+  BOSS_SHIELD_DURATION_MS,
+  BOSS_SHIELD_RING_COLOR,
+  BOSS_CHEAT_DECLARE_FREEZE_MS,
 } from '../../config/constants';
 
-// ---------------------------------------------------------------------------
-// Типы
-// ---------------------------------------------------------------------------
+/* ──────────────────────────────────────────────────────────────────────
+ * Типы опасностей ("Hazard") — пули, костяные стены, лучи-бластеры
+ * ────────────────────────────────────────────────────────────────────── */
 
-type BulletPatternType = 'straight' | 'sine' | 'homing';
-type SpawnSide = 'left' | 'right' | 'top' | 'bottom';
+type BulletMovement = 'straight' | 'sine' | 'homing';
 type BoneColorMode = 'normal' | 'blue' | 'orange';
-
-interface WordChallenge {
-  word: string;
-  codeSnippet: string;
-  timeLimitMs: number;
-}
-
-interface BulletSpawn {
-  kind: 'bullet';
-  delayMs: number;
-  side: SpawnSide;
-  speed: number;
-  pattern: BulletPatternType;
-}
-interface BoneWallVSpawn {
-  kind: 'boneWallV';
-  delayMs: number;
-  gapRatio: number;
-  fromLeft: boolean;
-  colorMode: BoneColorMode;
-}
-interface BoneWallHSpawn {
-  kind: 'boneWallH';
-  delayMs: number;
-  gapRatio: number;
-  fromTop: boolean;
-  colorMode: BoneColorMode;
-}
-interface BlasterSpawn {
-  kind: 'blaster';
-  delayMs: number;
-  orientation: 'horizontal' | 'vertical';
-  positionRatio: number;
-}
-type HazardSpawn = BulletSpawn | BoneWallVSpawn | BoneWallHSpawn | BlasterSpawn;
-
-interface CaptionSpawn {
-  atMs: number;
-  text: string;
-  durationMs?: number;
-}
-
-interface WaveConfig {
-  title: string;
-  masyaTip: string;
-  durationMs: number;
-  spawns: HazardSpawn[];
-  captions: CaptionSpawn[];
-  wordChallenges?: WordChallenge[];
-}
 
 interface BulletHazard {
   kind: 'bullet';
-  obj: Phaser.GameObjects.Shape;
-  x: number;
-  y: number;
+  obj: Phaser.GameObjects.Arc;
+  movement: BulletMovement;
+  age: number;
+  baseVx: number;
+  baseVy: number;
   vx: number;
   vy: number;
-  speed: number;
-  pattern: BulletPatternType;
-  sineOffset: number;
-  baseX: number;
-  baseY: number;
+  sineAmplitude: number;
+  sineFrequency: number;
 }
-interface BoneWallVHazard {
-  kind: 'boneWallV';
-  segTop: Phaser.GameObjects.Rectangle;
-  segBottom: Phaser.GameObjects.Rectangle;
-  x: number;
-  vx: number;
-  gapTop: number;
-  gapBottom: number;
-  colorMode: BoneColorMode;
-}
+
 interface BoneWallHHazard {
-  kind: 'boneWallH';
-  segLeft: Phaser.GameObjects.Rectangle;
-  segRight: Phaser.GameObjects.Rectangle;
+  kind: 'bone-wall-h';
+  rects: [Phaser.GameObjects.Rectangle, Phaser.GameObjects.Rectangle];
   y: number;
-  vy: number;
-  gapLeft: number;
-  gapRight: number;
+  gapCenterX: number;
+  gapSize: number;
+  speed: number;
   colorMode: BoneColorMode;
 }
+
+interface BoneWallVHazard {
+  kind: 'bone-wall-v';
+  rects: [Phaser.GameObjects.Rectangle, Phaser.GameObjects.Rectangle];
+  x: number;
+  gapCenterY: number;
+  gapSize: number;
+  speed: number;
+  colorMode: BoneColorMode;
+}
+
 interface BlasterHazard {
   kind: 'blaster';
   orientation: 'horizontal' | 'vertical';
-  position: number;
   telegraphObj: Phaser.GameObjects.Rectangle;
-  beamObj: Phaser.GameObjects.Rectangle | null;
+  beamObj?: Phaser.GameObjects.Rectangle;
+  position: number;
   state: 'telegraph' | 'firing';
-  elapsedMs: number;
-}
-type Hazard = BulletHazard | BoneWallVHazard | BoneWallHHazard | BlasterHazard;
-
-// ---------------------------------------------------------------------------
-// Генератор серии обычных пуль
-// ---------------------------------------------------------------------------
-
-function genBullets(
-  pattern: BulletPatternType,
-  count: number,
-  intervalMs: number,
-  sides: SpawnSide[],
-  speed: number,
-  startDelayMs = 0
-): BulletSpawn[] {
-  const spawns: BulletSpawn[] = [];
-  for (let i = 0; i < count; i++) {
-    spawns.push({
-      kind: 'bullet',
-      delayMs: startDelayMs + i * intervalMs,
-      side: sides[i % sides.length],
-      speed,
-      pattern,
-    });
-  }
-  return spawns;
+  stateElapsed: number;
+  telegraphMs: number;
+  beamMs: number;
+  thickness: number;
 }
 
-// ---------------------------------------------------------------------------
-// Конфигурация волн
-// ---------------------------------------------------------------------------
+type Hazard = BulletHazard | BoneWallHHazard | BoneWallVHazard | BlasterHazard;
 
-const WAVES: WaveConfig[] = [
-  {
-    title: 'Урок 1: Условие if / else',
-    masyaTip: 'Опасность слева? Шагни направо! Условие "если-то" управляет миром.',
-    durationMs: 13000,
-    spawns: [...genBullets('straight', 7, 1500, ['left', 'right'], 150)],
-    captions: [
-      { atMs: 300, text: 'if (bullet.side === "left") move("right")' },
-      { atMs: 7000, text: 'else move("left")' },
-    ],
-    wordChallenges: [{ word: 'if', codeSnippet: 'if (danger) autoDodge();', timeLimitMs: 6000 }],
-  },
-  {
-    title: 'Урок 2: Цикл for и синие кости',
-    masyaTip: 'Кости повторяются снова и снова — это цикл for! А синие кости бьют только того, кто ДВИЖЕТСЯ — замри вовремя!',
-    durationMs: 15000,
-    spawns: [
-      ...genBullets('straight', 4, 1800, ['top', 'bottom'], 150),
-      { kind: 'boneWallV', delayMs: 1500, gapRatio: 0.3, fromLeft: true, colorMode: 'normal' },
-      { kind: 'boneWallV', delayMs: 5000, gapRatio: 0.7, fromLeft: false, colorMode: 'blue' },
-      { kind: 'boneWallV', delayMs: 8500, gapRatio: 0.3, fromLeft: true, colorMode: 'normal' },
-      { kind: 'boneWallV', delayMs: 12000, gapRatio: 0.7, fromLeft: false, colorMode: 'blue' },
-    ],
-    captions: [
-      { atMs: 300, text: 'for (i = 0; i < 4; i++) { spawnBoneWall(gap) }' },
-      { atMs: 5200, text: 'СИНИЕ кости бьют, если ты ДВИЖЕШЬСЯ — замри!' },
-    ],
-    wordChallenges: [{ word: 'for', codeSnippet: 'for (i=0;i<4;i++) autoDodge();', timeLimitMs: 5500 }],
-  },
-  {
-    title: 'Урок 3: Переменная и оранжевые кости',
-    masyaTip: 'Треугольник запоминает твою позицию в переменной target. Оранжевые кости бьют, если ты СТОИШЬ — не замирай!',
-    durationMs: 17000,
-    spawns: [
-      ...genBullets('homing', 4, 3000, ['left', 'right'], 130),
-      { kind: 'boneWallH', delayMs: 2000, gapRatio: 0.4, fromTop: true, colorMode: 'normal' },
-      { kind: 'boneWallH', delayMs: 6500, gapRatio: 0.6, fromTop: false, colorMode: 'orange' },
-      { kind: 'blaster', delayMs: 11000, orientation: 'horizontal', positionRatio: 0.5 },
-      { kind: 'boneWallH', delayMs: 14000, gapRatio: 0.5, fromTop: true, colorMode: 'orange' },
-    ],
-    captions: [
-      { atMs: 300, text: 'let target = soul.position' },
-      { atMs: 6700, text: 'ОРАНЖЕВЫЕ кости бьют, если ты СТОИШЬ — двигайся!' },
-      { atMs: 10700, text: 'setTimeout(() => beam.fire(), 850)' },
-    ],
-    wordChallenges: [
-      { word: 'let', codeSnippet: 'let safeSpot = findGap(); autoDodge(safeSpot);', timeLimitMs: 5000 },
-    ],
-  },
-  {
-    title: 'Финал: весь код вместе',
-    masyaTip: 'Это всё, чему я могла научить! if, for, let — собери это в голове и пиши чит быстрее, чем я атакую!',
-    durationMs: 22000,
-    spawns: [
-      ...genBullets('sine', 6, 1500, ['left', 'right', 'top'], 160),
-      { kind: 'boneWallV', delayMs: 1000, gapRatio: 0.25, fromLeft: true, colorMode: 'blue' },
-      { kind: 'boneWallH', delayMs: 4200, gapRatio: 0.75, fromTop: false, colorMode: 'orange' },
-      { kind: 'blaster', delayMs: 7400, orientation: 'vertical', positionRatio: 0.3 },
-      { kind: 'blaster', delayMs: 11800, orientation: 'horizontal', positionRatio: 0.7 },
-      { kind: 'boneWallV', delayMs: 15500, gapRatio: 0.5, fromLeft: false, colorMode: 'normal' },
-      { kind: 'boneWallH', delayMs: 18500, gapRatio: 0.5, fromTop: true, colorMode: 'blue' },
-    ],
-    captions: [{ atMs: 300, text: 'combo: if + for + let — всё вместе!' }],
-    wordChallenges: [
-      { word: 'if', codeSnippet: 'if (danger) autoDodge();', timeLimitMs: 4200 },
-      { word: 'else', codeSnippet: 'else stayStill();', timeLimitMs: 4000 },
-      { word: 'for', codeSnippet: 'for (i=0;i<2;i++) autoDodge();', timeLimitMs: 3800 },
-      { word: 'let', codeSnippet: 'let win = true;', timeLimitMs: 3600 },
-    ],
-  },
-];
+/* ──────────────────────────────────────────────────────────────────────
+ * Читы: слово → реплики-объяснение → эффект на экране
+ * ────────────────────────────────────────────────────────────────────── */
 
-// ---------------------------------------------------------------------------
-// Сцена
-// ---------------------------------------------------------------------------
+type CheatEffectType = 'dodge-if' | 'invisible-else' | 'loop-for' | 'shield-let';
+
+interface CheatDefinition {
+  keyword: string;
+  effect: CheatEffectType;
+  timeLimitMs: number;
+  introLines: string[];
+  rewardCodeLines: string[];
+}
+
+const CHEAT_IF: CheatDefinition = {
+  keyword: 'if',
+  effect: 'dodge-if',
+  timeLimitMs: 4000,
+  introLines: [
+    'Смотри: если написать условие...',
+    '...точка сама поймёт, что опасно, и увернётся!',
+    'Напечатай "if" — и код сработает сам.',
+  ],
+  rewardCodeLines: ['if (danger) {', '  dodge();', '}'],
+};
+
+const CHEAT_FOR: CheatDefinition = {
+  keyword: 'for',
+  effect: 'loop-for',
+  timeLimitMs: 5000,
+  introLines: [
+    'Теперь цикл: он повторяет действие снова и снова.',
+    'Точка сама пробежит безопасный узор, пока код крутится.',
+    'Напечатай "for" — и смотри на повтор.',
+  ],
+  rewardCodeLines: ['for (let i = 0; i < 3; i++) {', '  move(pattern[i]);', '}'],
+};
+
+const CHEAT_LET: CheatDefinition = {
+  keyword: 'let',
+  effect: 'shield-let',
+  timeLimitMs: 4000,
+  introLines: [
+    'А здесь мы объявляем переменную.',
+    'Она хранит значение — и защищает тебя, пока существует!',
+    'Напечатай "let" — получишь щит на один удар.',
+  ],
+  rewardCodeLines: ['let shield = true;'],
+};
+
+const CHEAT_ELSE: CheatDefinition = {
+  keyword: 'else',
+  effect: 'invisible-else',
+  timeLimitMs: 4500,
+  introLines: [
+    'А если добавить "иначе"...',
+    '...точка на миг станет неосязаемой!',
+    'Печатай "else" — и снаряды пройдут мимо.',
+  ],
+  rewardCodeLines: ['} else {', '  becomeIntangible();', '}'],
+};
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Волны боссфайта
+ * ────────────────────────────────────────────────────────────────────── */
+
+interface WaveDefinition {
+  title: string;
+  durationMs: number;
+  introLines: string[];
+  build: (schedule: (delayMs: number, action: () => void) => void) => void;
+}
 
 export class UiMinigameScene extends Phaser.Scene {
+  // ── Геометрия арены ──
+  private arenaBounds = { x: 0, y: 0, width: 0, height: 0 };
+  private topPanelHalfHeight = 0;
+
+  // ── Игрок ──
+  private soul!: Phaser.GameObjects.Arc;
+  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private wasdKeys!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
+  private isSoulMovingThisFrame = false;
+
+  // ── Состояния боя ──
+  private hazards: Hazard[] = [];
+  private scheduledEvents: Phaser.Time.TimerEvent[] = [];
+  private activeTypewriterTimers: Phaser.Time.TimerEvent[] = [];
+  private stressLevel = 0;
+  private attempts = 0;
+  private isInvulnerable = false;
+  private isCodeChallengeActive = false;
+  private isInvisible = false;
+  private hasShield = false;
+  private shieldRing?: Phaser.GameObjects.Arc;
+  private activeWordKeyHandler: ((event: KeyboardEvent) => void) | null = null;
+
+  // ── UI ──
+  private dialogueText!: Phaser.GameObjects.Text;
+  private continueIndicator!: Phaser.GameObjects.Text;
+  private captionText!: Phaser.GameObjects.Text;
+  private stressBarFill!: Phaser.GameObjects.Rectangle;
+  private captionTween?: Phaser.Tweens.Tween;
+
+  private typewriterState: {
+    fullText: string;
+    timer?: Phaser.Time.TimerEvent;
+    isRunning: boolean;
+    onComplete?: () => void;
+  } = { fullText: '', isRunning: false };
+
+  // ── Диалоговый обработчик, завязан на this через field-arrow ──
+  private handleDialogueAdvance = (): void => {
+    if (this.typewriterState.isRunning) {
+      this.typewriterState.timer?.remove();
+      this.dialogueText.setText(this.typewriterState.fullText);
+      this.typewriterState.isRunning = false;
+      this.continueIndicator.setVisible(true);
+      return;
+    }
+    const callback = this.typewriterState.onComplete;
+    this.typewriterState.onComplete = undefined;
+    this.continueIndicator.setVisible(false);
+    callback?.();
+  };
+
+  private readonly WAVES: WaveDefinition[] = [
+    {
+      title: 'Урок 1: Условие if/else',
+      durationMs: 13000,
+      introLines: [
+        'Это Мася! Сегодня научу тебя читерить через код.',
+        'Смотри на пули и уворачивайся — руками, руками!',
+      ],
+      build: (schedule) => {
+        schedule(500, () => this.spawnBullet('straight'));
+        schedule(1800, () => this.spawnBullet('sine'));
+        schedule(3200, () => this.spawnBullet('straight'));
+        schedule(4600, () => this.spawnBullet('homing'));
+        schedule(6200, () => this.showWordChallenge(CHEAT_IF));
+        schedule(9500, () => this.spawnBullet('sine'));
+        schedule(10800, () => this.spawnBullet('straight'));
+      },
+    },
+    {
+      title: 'Урок 2: Цикл for и синие кости',
+      durationMs: 15000,
+      introLines: [
+        'Теперь кости! Обычные — просто находи дыру.',
+        'А вот синие кости бьют, только если ты ДВИГАЕШЬСЯ. Замри!',
+      ],
+      build: (schedule) => {
+        schedule(500, () => this.spawnBoneWallH(-50, 'normal'));
+        schedule(2600, () => this.spawnBoneWallV(-50, 'normal'));
+        schedule(5000, () => this.spawnBoneWallH(-50, 'blue'));
+        schedule(7500, () => this.showWordChallenge(CHEAT_FOR));
+        schedule(11000, () => this.spawnBoneWallH(-50, 'blue'));
+        schedule(13000, () => this.spawnBoneWallV(-50, 'normal'));
+      },
+    },
+    {
+      title: 'Урок 3: Переменная и оранжевые кости',
+      durationMs: 17000,
+      introLines: [
+        'Оранжевые кости — наоборот: бьют, если ты СТОИШЬ.',
+        'Переменная let хранит значение — скоро покажу, как она защищает.',
+      ],
+      build: (schedule) => {
+        schedule(500, () => this.spawnBoneWallH(-50, 'orange'));
+        schedule(3000, () => this.spawnBoneWallV(-50, 'orange'));
+        schedule(5500, () => this.showWordChallenge(CHEAT_LET));
+        schedule(9500, () => this.spawnBoneWallH(-50, 'orange'));
+        schedule(12000, () => this.spawnBullet('homing'));
+        schedule(13500, () => this.spawnBoneWallV(-50, 'blue'));
+      },
+    },
+    {
+      title: 'Финал: весь код вместе',
+      durationMs: 22000,
+      introLines: [
+        'А теперь — всё сразу! Как в настоящей программе.',
+        'Если запутаешься — вспоминай каждый читкод.',
+      ],
+      build: (schedule) => {
+        schedule(300, () => this.spawnBullet('sine'));
+        schedule(1500, () => this.spawnBoneWallH(-50, 'blue'));
+        schedule(3200, () => this.spawnBlaster('horizontal', this.arenaBounds.y + 40));
+        schedule(5200, () => this.showWordChallenge(CHEAT_IF));
+        schedule(8500, () => this.spawnBoneWallV(-50, 'orange'));
+        schedule(10200, () => this.spawnBullet('homing'));
+        schedule(11800, () => this.showWordChallenge(CHEAT_FOR));
+        schedule(15000, () => this.spawnBlaster('vertical', this.arenaBounds.x + 40));
+        schedule(16500, () => this.showWordChallenge(CHEAT_LET));
+        schedule(19500, () => this.showWordChallenge(CHEAT_ELSE));
+      },
+    },
+  ];
+
   public constructor() {
     super('UiMinigameScene');
   }
 
-  private currentWaveIndex = 0;
-  private stressLevel = 0;
-  private attempts = 1;
-  private isGameOver = false;
-  private isCodeChallengeActive = false;
-  private isInvulnerable = false;
-  private isSoulMovingThisFrame = false;
+  /* ──────────────────────────────────────────────────────────────────
+   * Жизненный цикл сцены
+   * ────────────────────────────────────────────────────────────────── */
 
-  private boxLeft = 0;
-  private boxRight = 0;
-  private boxTop = 0;
-  private boxBottom = 0;
-  private soulX = 0;
-  private soulY = 0;
-  private soulSprite!: Phaser.GameObjects.Arc;
-
-  private hazards: Hazard[] = [];
-  private scheduledEvents: Phaser.Time.TimerEvent[] = [];
-  private activeWordKeyHandler: ((event: KeyboardEvent) => void) | null = null;
-  private activeDialogueSkipHandler: ((event: KeyboardEvent) => void) | null = null;
-  private activeTypewriterTimers: Phaser.Time.TimerEvent[] = [];
-
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  private keys!: {
-    W: Phaser.Input.Keyboard.Key;
-    A: Phaser.Input.Keyboard.Key;
-    S: Phaser.Input.Keyboard.Key;
-    D: Phaser.Input.Keyboard.Key;
-  };
-
-  private stressBarFill!: Phaser.GameObjects.Rectangle;
-  private statusText!: Phaser.GameObjects.Text;
-
-  private captionBg!: Phaser.GameObjects.Rectangle;
-  private captionText!: Phaser.GameObjects.Text;
-  private captionTween: Phaser.Tweens.Tween | null = null;
-  private captionCenterY = 0;
-
-  private topPanelBg!: Phaser.GameObjects.Rectangle;
-  private dialogueText!: Phaser.GameObjects.Text;
-  private continueIndicator!: Phaser.GameObjects.Text;
-  private waveLabel!: Phaser.GameObjects.Text;
-  private topPanelCenterY = 0;
-  private topPanelHalfHeight = 0;
-
-  public create(data?: { attempts?: number }): void {
-    this.currentWaveIndex = 0;
-    this.stressLevel = 0;
-    this.isGameOver = false;
-    this.isCodeChallengeActive = false;
-    this.isInvulnerable = false;
-    this.attempts = data?.attempts || 1;
-    this.hazards = [];
-    this.scheduledEvents = [];
-    this.activeWordKeyHandler = null;
-    this.activeDialogueSkipHandler = null;
-    this.activeTypewriterTimers = [];
-
-    this.buildBackground();
+  public create(): void {
+    this.resetState();
     this.computeLayoutAndBuildArena();
     this.buildTopPanel();
-    this.buildCaptionBox();
-    this.buildHud();
-
-    this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D') as {
-      W: Phaser.Input.Keyboard.Key;
-      A: Phaser.Input.Keyboard.Key;
-      S: Phaser.Input.Keyboard.Key;
-      D: Phaser.Input.Keyboard.Key;
-    };
+    this.buildFooter();
+    this.buildSoul();
+    this.setupInput();
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanup, this);
 
@@ -325,899 +315,963 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
   public update(_time: number, delta: number): void {
-    if (this.isGameOver || this.isCodeChallengeActive) return;
-    const dt = delta / 1000;
-    this.isSoulMovingThisFrame = this.moveSoul(dt);
-    this.updateHazards(dt, delta);
+    this.updateSoulMovement(delta);
+    this.updateHazards(delta);
+
+    if (this.shieldRing) {
+      this.shieldRing.setPosition(this.soul.x, this.soul.y);
+    }
   }
 
-  // --- Построение сцены ------------------------------------------------------
-
-  private buildBackground(): void {
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x0f172a).setOrigin(0, 0);
-    const exitBtn = this.add
-      .text(24, 20, '← Сдаться', { fontFamily: 'monospace', fontSize: '14px', color: '#94a3b8' })
-      .setInteractive({ useHandCursor: true });
-    exitBtn.on('pointerdown', () => {
-      this.game.events.emit('minigame-exit');
-      this.scene.stop();
-    });
+  private resetState(): void {
+    this.hazards = [];
+    this.scheduledEvents = [];
+    this.activeTypewriterTimers = [];
+    this.stressLevel = 0;
+    this.attempts = 0;
+    this.isInvulnerable = false;
+    this.isCodeChallengeActive = false;
+    this.isInvisible = false;
+    this.hasShield = false;
+    this.isSoulMovingThisFrame = false;
   }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Построение сцены: арена, панель диалога, подвал, сердце, ввод
+   * ────────────────────────────────────────────────────────────────── */
 
   private computeLayoutAndBuildArena(): void {
-    const topReserved = BOSS_ARENA_TOP_ROW_HEIGHT;
-    const footerReserved = BOSS_ARENA_FOOTER_HEIGHT;
-    const available = GAME_HEIGHT - topReserved - footerReserved - BOSS_BOX_HEIGHT;
-    const panelHeight = Math.max(90, Math.min(BOSS_TOP_PANEL_HEIGHT, available * 0.6));
-    this.topPanelHalfHeight = panelHeight / 2;
-    const captionHeight = 26;
-    const gap = 10;
+    const panelTopMargin = 20;
+    this.topPanelHalfHeight = BOSS_TOP_PANEL_HEIGHT / 2;
 
-    const stackTop = topReserved;
-    this.topPanelCenterY = stackTop + panelHeight / 2;
-    this.captionCenterY = stackTop + panelHeight + gap + captionHeight / 2;
-    this.boxTop = stackTop + panelHeight + gap + captionHeight + gap;
-    this.boxBottom = this.boxTop + BOSS_BOX_HEIGHT;
-    this.boxLeft = GAME_WIDTH / 2 - BOSS_BOX_WIDTH / 2;
-    this.boxRight = GAME_WIDTH / 2 + BOSS_BOX_WIDTH / 2;
+    const arenaX = (GAME_WIDTH - BOSS_BOX_WIDTH) / 2;
+    const arenaY = panelTopMargin + BOSS_TOP_PANEL_HEIGHT + BOSS_ARENA_TOP_ROW_HEIGHT;
+
+    this.arenaBounds = { x: arenaX, y: arenaY, width: BOSS_BOX_WIDTH, height: BOSS_BOX_HEIGHT };
 
     this.add
-      .rectangle(GAME_WIDTH / 2, (this.boxTop + this.boxBottom) / 2, BOSS_BOX_WIDTH, BOSS_BOX_HEIGHT, 0x000000)
-      .setStrokeStyle(3, 0xffffff);
-
-    this.soulX = GAME_WIDTH / 2;
-    this.soulY = (this.boxTop + this.boxBottom) / 2;
-    this.soulSprite = this.add.circle(this.soulX, this.soulY, BOSS_SOUL_RADIUS, 0xff0000).setDepth(50);
+      .rectangle(
+        arenaX + BOSS_BOX_WIDTH / 2,
+        arenaY + BOSS_BOX_HEIGHT / 2,
+        BOSS_BOX_WIDTH,
+        BOSS_BOX_HEIGHT,
+        0x020617,
+        0.9,
+      )
+      .setStrokeStyle(2, 0xf8fafc);
   }
 
   private buildTopPanel(): void {
-    const cx = GAME_WIDTH / 2;
-    const cy = this.topPanelCenterY;
-    const panelW = Math.min(BOSS_TOP_PANEL_WIDTH, GAME_WIDTH - 60);
+    const panelX = GAME_WIDTH / 2;
+    const panelY = 20 + this.topPanelHalfHeight;
 
-    this.topPanelBg = this.add
-      .rectangle(cx, cy, panelW, this.topPanelHalfHeight * 2, 0x000000, 0.92)
-      .setStrokeStyle(3, 0xffffff)
-      .setDepth(100);
+    const panelBg = this.add
+      .rectangle(panelX, panelY, BOSS_TOP_PANEL_WIDTH, BOSS_TOP_PANEL_HEIGHT, 0x0f172a, 0.95)
+      .setStrokeStyle(2, 0x334155);
 
-    const portraitX = cx - panelW / 2 + BOSS_PORTRAIT_SIZE / 2 + 14;
+    const portraitX = panelX - BOSS_TOP_PANEL_WIDTH / 2 + BOSS_PORTRAIT_SIZE / 2 + 16;
 
     if (this.textures.exists('npc_max')) {
-      this.add
-        .image(portraitX, cy, 'npc_max')
-        .setDisplaySize(BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE)
-        .setDepth(101);
+      this.add.image(portraitX, panelY, 'npc_max').setDisplaySize(BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE);
     } else {
+      this.add.rectangle(portraitX, panelY, BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE, 0x7c3aed);
       this.add
-        .rectangle(portraitX, cy, BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE, 0x9333ea)
-        .setDepth(101);
-      this.add
-        .text(portraitX, cy, 'М', { fontFamily: 'monospace', fontSize: '36px', color: '#fff' })
-        .setOrigin(0.5)
-        .setDepth(102);
+        .text(portraitX, panelY, 'М', { fontSize: '36px', color: '#ffffff', fontStyle: 'bold' })
+        .setOrigin(0.5);
     }
 
-    this.add
-      .text(portraitX, cy + BOSS_PORTRAIT_SIZE / 2 + 14, 'МАСЯ', {
-        fontFamily: 'monospace',
-        fontSize: '13px',
-        color: '#fbbf24',
-        fontStyle: 'bold',
-      })
-      .setOrigin(0.5)
-      .setDepth(101);
-
     const textX = portraitX + BOSS_PORTRAIT_SIZE / 2 + 20;
-    const textAreaWidth = panelW / 2 + panelW / 2 - (textX - (cx - panelW / 2)) - 20;
+    const textWidth = panelX + BOSS_TOP_PANEL_WIDTH / 2 - textX - 24;
 
     this.dialogueText = this.add
-      .text(textX, cy, '', {
-        fontFamily: 'monospace',
-        fontSize: '14px',
+      .text(textX, panelY - 16, '', {
+        fontSize: '16px',
         color: '#e2e8f0',
-        wordWrap: { width: textAreaWidth },
+        wordWrap: { width: textWidth },
       })
-      .setOrigin(0, 0.5)
-      .setDepth(101);
+      .setOrigin(0, 0.5);
 
     this.continueIndicator = this.add
-      .text(cx + panelW / 2 - 24, cy + this.topPanelHalfHeight - 16, '▼', {
-        fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#4ade80',
-      })
+      .text(
+        panelX + BOSS_TOP_PANEL_WIDTH / 2 - 24,
+        panelY + BOSS_TOP_PANEL_HEIGHT / 2 - 18,
+        '▼',
+        { fontSize: '14px', color: '#94a3b8' },
+      )
       .setOrigin(0.5)
-      .setDepth(101)
       .setVisible(false);
 
-    this.waveLabel = this.add
-      .text(cx - panelW / 2 + 10, cy - this.topPanelHalfHeight + 10, '', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#64748b',
-      })
-      .setDepth(101);
+    panelBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.handleDialogueAdvance());
+    this.input.keyboard!.on('keydown-SPACE', () => this.handleDialogueAdvance());
   }
 
-  private buildCaptionBox(): void {
-    this.captionBg = this.add
-      .rectangle(GAME_WIDTH / 2, this.captionCenterY, GAME_WIDTH - 120, 24, 0x0f172a, 0.85)
+  private buildFooter(): void {
+    const bounds = this.arenaBounds;
+    const barY = bounds.y + bounds.height + BOSS_ARENA_FOOTER_HEIGHT / 2;
+
+    this.add.text(bounds.x, barY - 22, 'Стресс:', { fontSize: '13px', color: '#94a3b8' });
+
+    this.add
+      .rectangle(bounds.x + STRESS_BAR_WIDTH / 2, barY, STRESS_BAR_WIDTH, STRESS_BAR_HEIGHT, 0x1f2937)
       .setStrokeStyle(1, 0x334155)
-      .setDepth(90)
-      .setAlpha(0);
-    this.captionText = this.add
-      .text(GAME_WIDTH / 2, this.captionCenterY, '', {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#4ade80',
-      })
-      .setOrigin(0.5)
-      .setDepth(91)
-      .setAlpha(0);
-  }
+      .setOrigin(0.5);
 
-  private showCaption(text: string, durationMs = BOSS_CAPTION_FADE_MS): void {
-    this.captionText.setText(text);
-    this.captionBg.setAlpha(0.85);
-    this.captionText.setAlpha(1);
-    if (this.captionTween) this.captionTween.remove();
-    this.captionTween = this.tweens.add({
-      targets: [this.captionBg, this.captionText],
-      alpha: 0,
-      delay: durationMs,
-      duration: 400,
-    });
-  }
-
-  private buildHud(): void {
-    const barX = GAME_WIDTH - STRESS_BAR_WIDTH - 24;
-    const barY = 20;
-    this.add.text(barX, barY - 18, 'Уровень опасности', {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: '#f87171',
-    });
-    this.add.rectangle(barX, barY, STRESS_BAR_WIDTH, STRESS_BAR_HEIGHT, 0x374151).setOrigin(0, 0);
     this.stressBarFill = this.add
-      .rectangle(barX, barY, 0, STRESS_BAR_HEIGHT, 0xf87171)
-      .setOrigin(0, 0);
+      .rectangle(bounds.x, barY, 0, STRESS_BAR_HEIGHT, 0xef4444)
+      .setOrigin(0, 0.5);
 
-    this.statusText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - BOSS_ARENA_FOOTER_HEIGHT / 2, '', {
-        fontFamily: 'monospace',
-        fontSize: '15px',
-        color: '#fbbf24',
+    this.captionText = this.add
+      .text(bounds.x + bounds.width, barY, '', {
+        fontSize: '13px',
+        color: '#4ade80',
+        align: 'right',
+        wordWrap: { width: 260 },
       })
-      .setOrigin(0.5, 0.5);
+      .setOrigin(1, 0.5)
+      .setAlpha(0);
   }
 
-  // --- Печатающийся текст (typewriter) ----------------------------------------
+  private buildSoul(): void {
+    const bounds = this.arenaBounds;
+    this.soul = this.add
+      .circle(bounds.x + bounds.width / 2, bounds.y + bounds.height - 30, BOSS_SOUL_RADIUS, 0xef4444)
+      .setDepth(100);
+  }
 
-  private runTypewriter(
-    target: Phaser.GameObjects.Text,
-    fullText: string,
-    speedMs: number,
-    onComplete: () => void
-  ): void {
-    target.setText('');
-    let idx = 0;
+  private setupInput(): void {
+    this.cursors = this.input.keyboard!.createCursorKeys();
+    this.wasdKeys = this.input.keyboard!.addKeys('W,S,A,D') as Record<
+      'W' | 'A' | 'S' | 'D',
+      Phaser.Input.Keyboard.Key
+    >;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Диалоговая печать (typewriter)
+   * ────────────────────────────────────────────────────────────────── */
+
+  private runTypewriter(text: string, onComplete: () => void): void {
+    this.dialogueText.setText('');
+    this.typewriterState.fullText = text;
+    this.typewriterState.isRunning = true;
+    this.typewriterState.onComplete = onComplete;
+    this.continueIndicator.setVisible(false);
+
+    let charIndex = 0;
     const timer = this.time.addEvent({
-      delay: speedMs,
+      delay: BOSS_TYPEWRITER_MS,
       loop: true,
       callback: () => {
-        idx++;
-        target.setText(fullText.slice(0, idx));
-        if (idx >= fullText.length) {
+        charIndex += 1;
+        this.dialogueText.setText(text.slice(0, charIndex));
+        if (charIndex >= text.length) {
           timer.remove();
-          this.activeTypewriterTimers = this.activeTypewriterTimers.filter((t) => t !== timer);
-          onComplete();
+          this.typewriterState.isRunning = false;
+          this.continueIndicator.setVisible(true);
+        }
+      },
+    });
+
+    this.typewriterState.timer = timer;
+    this.activeTypewriterTimers.push(timer);
+  }
+
+  private runDialogueSequence(lines: string[], onDone: () => void): void {
+    let index = 0;
+    const showNext = (): void => {
+      if (index >= lines.length) {
+        onDone();
+        return;
+      }
+      const line = lines[index];
+      index += 1;
+      this.runTypewriter(line, showNext);
+    };
+    showNext();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Волны
+   * ────────────────────────────────────────────────────────────────── */
+
+  private startWave(index: number): void {
+    if (index >= this.WAVES.length) {
+      this.handleVictory();
+      return;
+    }
+
+    const wave = this.WAVES[index];
+    this.clearHazards();
+    this.applyStressChange(-BOSS_WAVE_BREATHER_RELIEF);
+
+    this.runDialogueSequence([wave.title, ...wave.introLines], () => {
+      const schedule = (delayMs: number, action: () => void): void => {
+        const event = this.time.delayedCall(delayMs, action);
+        this.scheduledEvents.push(event);
+      };
+
+      wave.build(schedule);
+
+      const waveEndEvent = this.time.delayedCall(wave.durationMs, () => this.tryAdvanceWave(index + 1));
+      this.scheduledEvents.push(waveEndEvent);
+    });
+  }
+
+  /** Не переходим к следующей волне, пока открыт чит-челлендж / идёт автопилот. */
+  private tryAdvanceWave(nextIndex: number): void {
+    if (this.isCodeChallengeActive) {
+      const pollEvent = this.time.delayedCall(300, () => this.tryAdvanceWave(nextIndex));
+      this.scheduledEvents.push(pollEvent);
+      return;
+    }
+    this.startWave(nextIndex);
+  }
+
+  private clearHazards(): void {
+    this.scheduledEvents.forEach((event) => event.remove(false));
+    this.scheduledEvents = [];
+    this.hazards.forEach((hazard) => this.destroyHazardObjects(hazard));
+    this.hazards = [];
+  }
+
+  private destroyHazardObjects(hazard: Hazard): void {
+    if (hazard.kind === 'bullet') {
+      hazard.obj.destroy();
+    } else if (hazard.kind === 'bone-wall-h' || hazard.kind === 'bone-wall-v') {
+      hazard.rects.forEach((rect) => rect.destroy());
+    } else if (hazard.kind === 'blaster') {
+      hazard.telegraphObj.destroy();
+      hazard.beamObj?.destroy();
+    }
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Механика "Напечатай слово"
+   * ────────────────────────────────────────────────────────────────── */
+
+  private showWordChallenge(def: CheatDefinition): void {
+    this.isCodeChallengeActive = true;
+    this.runDialogueSequence(def.introLines, () => this.openWordChallengeWindow(def));
+  }
+
+  private openWordChallengeWindow(def: CheatDefinition): void {
+    const word = def.keyword;
+    let typedCount = 0;
+
+    const windowWidth = 260;
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+
+    const container = this.add.container(centerX, centerY).setDepth(200);
+    const bg = this.add
+      .rectangle(0, 0, windowWidth, 110, 0x111827, 0.92)
+      .setStrokeStyle(2, 0x60a5fa);
+    const prompt = this.add
+      .text(0, -28, 'Напечатай:', { fontSize: '14px', color: '#94a3b8' })
+      .setOrigin(0.5);
+
+    const letterTexts: Phaser.GameObjects.Text[] = [];
+    const letterSpacing = 22;
+    const startX = -((word.length - 1) * letterSpacing) / 2;
+    for (let i = 0; i < word.length; i += 1) {
+      const letterText = this.add
+        .text(startX + i * letterSpacing, 0, word[i], {
+          fontSize: '26px',
+          fontStyle: 'bold',
+          color: '#64748b',
+        })
+        .setOrigin(0.5);
+      letterTexts.push(letterText);
+    }
+
+    const timerBarWidth = windowWidth - 30;
+    const timerBarBg = this.add
+      .rectangle(0, 32, timerBarWidth, 8, 0x1f2937)
+      .setStrokeStyle(1, 0x334155);
+    const timerBarFill = this.add
+      .rectangle(-timerBarWidth / 2, 32, timerBarWidth, 8, 0x60a5fa)
+      .setOrigin(0, 0.5);
+
+    container.add([bg, prompt, ...letterTexts, timerBarBg, timerBarFill]);
+    container.setScale(0.3).setAlpha(0);
+    this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 220, ease: 'Back.easeOut' });
+
+    const cleanupChallenge = (): void => {
+      if (this.activeWordKeyHandler) {
+        window.removeEventListener('keydown', this.activeWordKeyHandler);
+        this.activeWordKeyHandler = null;
+      }
+      timerTween.stop();
+      container.destroy();
+    };
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.repeat) return;
+      const expected = word[typedCount];
+      if (event.key.toLowerCase() === expected) {
+        letterTexts[typedCount].setColor('#4ade80');
+        typedCount += 1;
+        if (typedCount === word.length) {
+          cleanupChallenge();
+          this.runCheatEffect(def);
+        }
+      }
+    };
+
+    this.activeWordKeyHandler = onKeyDown;
+    window.addEventListener('keydown', onKeyDown);
+
+    const timerTween = this.tweens.add({
+      targets: timerBarFill,
+      scaleX: 0,
+      duration: def.timeLimitMs,
+      onComplete: () => {
+        cleanupChallenge();
+        this.applyStressChange(BOSS_WORD_CHALLENGE_FAIL_STRESS);
+        this.isCodeChallengeActive = false;
+      },
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Диспетчер эффектов чита + печать кода-награды
+   * ────────────────────────────────────────────────────────────────── */
+
+  private printRewardCode(lines: string[]): void {
+    const fullText = lines.join('\n');
+    this.captionTween?.stop();
+    this.captionText.setAlpha(1).setText('');
+
+    let charIndex = 0;
+    const timer = this.time.addEvent({
+      delay: BOSS_CODE_TYPEWRITER_MS,
+      loop: true,
+      callback: () => {
+        charIndex += 1;
+        this.captionText.setText(fullText.slice(0, charIndex));
+        if (charIndex >= fullText.length) {
+          timer.remove();
+          this.captionTween = this.tweens.add({
+            targets: this.captionText,
+            alpha: 0,
+            delay: 1800,
+            duration: BOSS_CAPTION_FADE_MS,
+          });
         }
       },
     });
     this.activeTypewriterTimers.push(timer);
   }
 
-  // --- Движение игрока --------------------------------------------------------
+  private runCheatEffect(def: CheatDefinition): void {
+    this.applyStressChange(-BOSS_WORD_CHALLENGE_RELIEF);
+    this.printRewardCode(def.rewardCodeLines);
 
-  private moveSoul(dt: number): boolean {
-    let dx = 0;
-    let dy = 0;
-    if (this.cursors.left.isDown || this.keys.A.isDown) dx -= 1;
-    if (this.cursors.right.isDown || this.keys.D.isDown) dx += 1;
-    if (this.cursors.up.isDown || this.keys.W.isDown) dy -= 1;
-    if (this.cursors.down.isDown || this.keys.S.isDown) dy += 1;
-
-    const isMoving = dx !== 0 || dy !== 0;
-
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.7071;
-      dy *= 0.7071;
+    switch (def.effect) {
+      case 'dodge-if':
+        this.playDodgeIfEffect();
+        break;
+      case 'invisible-else':
+        this.playInvisibleElseEffect();
+        break;
+      case 'loop-for':
+        this.playLoopForEffect();
+        break;
+      case 'shield-let':
+        this.playShieldLetEffect();
+        break;
     }
-
-    this.soulX = Phaser.Math.Clamp(
-      this.soulX + dx * BOSS_SOUL_SPEED * dt,
-      this.boxLeft + BOSS_SOUL_RADIUS,
-      this.boxRight - BOSS_SOUL_RADIUS
-    );
-    this.soulY = Phaser.Math.Clamp(
-      this.soulY + dy * BOSS_SOUL_SPEED * dt,
-      this.boxTop + BOSS_SOUL_RADIUS,
-      this.boxBottom - BOSS_SOUL_RADIUS
-    );
-    this.soulSprite.setPosition(this.soulX, this.soulY);
-
-    return isMoving;
   }
 
-  // --- Спавн опасностей --------------------------------------------------------
-
-  private spawnBullet(side: SpawnSide, speed: number, pattern: BulletPatternType): void {
-    let x = 0;
-    let y = 0;
-    let vx = 0;
-    let vy = 0;
-    const margin = 20;
-
-    switch (side) {
-      case 'left':
-        x = this.boxLeft - margin;
-        y = Phaser.Math.Between(this.boxTop + 10, this.boxBottom - 10);
-        vx = speed;
-        break;
-      case 'right':
-        x = this.boxRight + margin;
-        y = Phaser.Math.Between(this.boxTop + 10, this.boxBottom - 10);
-        vx = -speed;
-        break;
-      case 'top':
-        y = this.boxTop - margin;
-        x = Phaser.Math.Between(this.boxLeft + 10, this.boxRight - 10);
-        vy = speed;
-        break;
-      case 'bottom':
-        y = this.boxBottom + margin;
-        x = Phaser.Math.Between(this.boxLeft + 10, this.boxRight - 10);
-        vy = -speed;
-        break;
-    }
-
-    let shape: Phaser.GameObjects.Shape;
-    if (pattern === 'homing') {
-      const r = BOSS_BULLET_RADIUS;
-      shape = this.add.triangle(x, y, 0, -r, -r, r, r, r, 0xef4444);
-    } else if (pattern === 'sine') {
-      shape = this.add
-        .rectangle(x, y, BOSS_BULLET_RADIUS * 1.6, BOSS_BULLET_RADIUS * 1.6, 0xfbbf24)
-        .setAngle(45);
-    } else {
-      shape = this.add.circle(x, y, BOSS_BULLET_RADIUS, 0xffffff);
-    }
-
-    this.hazards.push({
-      kind: 'bullet',
-      obj: shape,
-      x,
-      y,
-      vx,
-      vy,
-      speed,
-      pattern,
-      sineOffset: Math.random() * Math.PI * 2,
-      baseX: x,
-      baseY: y,
+  /** if — одиночный уворот: точка сама уезжает в безопасную точку, бой заморожен. */
+  private playDodgeIfEffect(): void {
+    const target = this.findSafeDodgeTarget();
+    this.tweens.add({
+      targets: this.soul,
+      x: target.x,
+      y: target.y,
+      duration: BOSS_AUTOPILOT_MS,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.isCodeChallengeActive = false;
+      },
     });
   }
 
-  private boneColor(mode: BoneColorMode): number {
-    if (mode === 'blue') return BOSS_BONE_COLOR_BLUE;
-    if (mode === 'orange') return BOSS_BONE_COLOR_ORANGE;
+  /** else — временная неосязаемость, управление возвращается сразу, бой НЕ заморожен. */
+  private playInvisibleElseEffect(): void {
+    this.isInvisible = true;
+    this.isCodeChallengeActive = false;
+    this.soul.setFillStyle(0x93c5fd, 1);
+
+    const flicker = this.tweens.add({
+      targets: this.soul,
+      alpha: 0.35,
+      duration: 160,
+      yoyo: true,
+      repeat: -1,
+    });
+
+    this.time.delayedCall(BOSS_INVISIBLE_DURATION_MS, () => {
+      flicker.stop();
+      this.soul.setAlpha(1).setFillStyle(0xef4444, 1);
+      this.isInvisible = false;
+    });
+  }
+
+  /** for — несколько последовательных рывков, видно, что это цикл. */
+  private playLoopForEffect(): void {
+    const path = [this.findSafeDodgeTarget(), this.findSafeDodgeTarget(), this.findSafeDodgeTarget()];
+    const stepDuration = BOSS_LOOP_PATTERN_DURATION_MS / path.length;
+    let step = 0;
+
+    const runStep = (): void => {
+      if (step >= path.length) {
+        this.isCodeChallengeActive = false;
+        return;
+      }
+      const point = path[step];
+      step += 1;
+      this.tweens.add({
+        targets: this.soul,
+        x: point.x,
+        y: point.y,
+        duration: stepDuration,
+        ease: 'Sine.easeInOut',
+        onComplete: runStep,
+      });
+    };
+
+    runStep();
+  }
+
+  /** let — щит на один удар, управление возвращается почти сразу, бой НЕ заморожен. */
+  private playShieldLetEffect(): void {
+    this.hasShield = true;
+
+    const ring = this.add
+      .circle(this.soul.x, this.soul.y, BOSS_SOUL_RADIUS + 6, BOSS_SHIELD_RING_COLOR, 0)
+      .setStrokeStyle(3, BOSS_SHIELD_RING_COLOR, 1)
+      .setScale(0.3)
+      .setAlpha(0)
+      .setDepth(150);
+
+    this.tweens.add({ targets: ring, scale: 1, alpha: 1, duration: 250, ease: 'Back.easeOut' });
+    this.shieldRing = ring;
+
+    this.time.delayedCall(BOSS_CHEAT_DECLARE_FREEZE_MS, () => {
+      this.isCodeChallengeActive = false;
+    });
+
+    this.time.delayedCall(BOSS_SHIELD_DURATION_MS, () => {
+      if (this.hasShield) this.consumeShield(false);
+    });
+  }
+
+  private consumeShield(wasHit: boolean): void {
+    this.hasShield = false;
+    const ring = this.shieldRing;
+    this.shieldRing = undefined;
+    if (!ring) return;
+
+    this.tweens.add({
+      targets: ring,
+      scale: wasHit ? 1.6 : 0.2,
+      alpha: 0,
+      duration: 200,
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Поиск безопасной точки (для dodge-if / loop-for)
+   * ────────────────────────────────────────────────────────────────── */
+
+  private findSafeDodgeTarget(): { x: number; y: number } {
+    const inset = BOSS_SOUL_RADIUS + 10;
+    const bounds = this.arenaBounds;
+    let fallback = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidate = {
+        x: Phaser.Math.Between(bounds.x + inset, bounds.x + bounds.width - inset),
+        y: Phaser.Math.Between(bounds.y + inset, bounds.y + bounds.height - inset),
+      };
+      if (this.isPointSafe(candidate.x, candidate.y)) {
+        return candidate;
+      }
+      fallback = candidate;
+    }
+    return fallback;
+  }
+
+  private isPointSafe(x: number, y: number): boolean {
+    for (const hazard of this.hazards) {
+      if (hazard.kind === 'bullet') {
+        const dist = Phaser.Math.Distance.Between(x, y, hazard.obj.x, hazard.obj.y);
+        if (dist < BOSS_BULLET_RADIUS + BOSS_SOUL_RADIUS + 24) return false;
+      } else if (hazard.kind === 'bone-wall-v') {
+        if (Math.abs(x - hazard.x) < BOSS_BONE_THICKNESS + BOSS_SOUL_RADIUS + 16) {
+          if (Math.abs(y - hazard.gapCenterY) > hazard.gapSize / 2 - BOSS_SOUL_RADIUS) return false;
+        }
+      } else if (hazard.kind === 'bone-wall-h') {
+        if (Math.abs(y - hazard.y) < BOSS_BONE_THICKNESS + BOSS_SOUL_RADIUS + 16) {
+          if (Math.abs(x - hazard.gapCenterX) > hazard.gapSize / 2 - BOSS_SOUL_RADIUS) return false;
+        }
+      } else if (hazard.kind === 'blaster' && hazard.state === 'firing') {
+        if (hazard.orientation === 'horizontal' && Math.abs(y - hazard.position) < hazard.thickness) return false;
+        if (hazard.orientation === 'vertical' && Math.abs(x - hazard.position) < hazard.thickness) return false;
+      }
+    }
+    return true;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Урон, неуязвимость, стресс
+   * ────────────────────────────────────────────────────────────────── */
+
+  private tryDamageSoul(amount: number, shakeIntensity: number, shakeDuration: number): void {
+    if (this.isInvulnerable || this.isCodeChallengeActive || this.isInvisible) return;
+    if (this.hasShield) {
+      this.consumeShield(true);
+      return;
+    }
+    this.applyHitDamage(amount, shakeIntensity, shakeDuration);
+  }
+
+  private applyHitDamage(amount: number, shakeIntensity: number, shakeDuration: number): void {
+    this.isInvulnerable = true;
+    this.attempts += 1;
+    this.cameras.main.shake(shakeDuration, shakeIntensity);
+    this.applyStressChange(amount);
+
+    const halfCycles = 8;
+    const halfCycleDuration = BOSS_INVULNERABILITY_MS / halfCycles;
+    for (let i = 0; i < halfCycles; i += 1) {
+      this.time.delayedCall(i * halfCycleDuration, () => {
+        this.soul.setAlpha(i % 2 === 0 ? 0.25 : 1);
+      });
+    }
+    this.time.delayedCall(BOSS_INVULNERABILITY_MS, () => {
+      this.soul.setAlpha(1);
+      this.isInvulnerable = false;
+    });
+
+    if (this.stressLevel >= STRESS_BAR_MAX) {
+      this.handleDefeat();
+    }
+  }
+
+  private applyStressChange(delta: number): void {
+    this.stressLevel = Phaser.Math.Clamp(this.stressLevel + delta, 0, STRESS_BAR_MAX);
+    this.updateStressBar();
+  }
+
+  private updateStressBar(): void {
+    const ratio = this.stressLevel / STRESS_BAR_MAX;
+    const targetWidth = STRESS_BAR_WIDTH * ratio;
+    this.tweens.add({
+      targets: this.stressBarFill,
+      width: targetWidth,
+      duration: 250,
+      ease: 'Cubic.easeOut',
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Движение сердца
+   * ────────────────────────────────────────────────────────────────── */
+
+  private updateSoulMovement(delta: number): void {
+    if (this.isCodeChallengeActive) {
+      this.isSoulMovingThisFrame = false;
+      return;
+    }
+
+    let dx = 0;
+    let dy = 0;
+    if (this.cursors.left.isDown || this.wasdKeys.A.isDown) dx -= 1;
+    if (this.cursors.right.isDown || this.wasdKeys.D.isDown) dx += 1;
+    if (this.cursors.up.isDown || this.wasdKeys.W.isDown) dy -= 1;
+    if (this.cursors.down.isDown || this.wasdKeys.S.isDown) dy += 1;
+
+    this.isSoulMovingThisFrame = dx !== 0 || dy !== 0;
+
+    if (this.isSoulMovingThisFrame) {
+      const length = Math.hypot(dx, dy) || 1;
+      const speed = BOSS_SOUL_SPEED * (delta / 1000);
+      const bounds = this.arenaBounds;
+      const inset = BOSS_SOUL_RADIUS;
+
+      this.soul.x = Phaser.Math.Clamp(
+        this.soul.x + (dx / length) * speed,
+        bounds.x + inset,
+        bounds.x + bounds.width - inset,
+      );
+      this.soul.y = Phaser.Math.Clamp(
+        this.soul.y + (dy / length) * speed,
+        bounds.y + inset,
+        bounds.y + bounds.height - inset,
+      );
+    }
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Обновление опасностей
+   * ────────────────────────────────────────────────────────────────── */
+
+  private updateHazards(delta: number): void {
+    if (this.isCodeChallengeActive) return; // бой заморожен во время чит-эффекта
+
+    const dt = delta / 1000;
+    const remaining: Hazard[] = [];
+
+    for (const hazard of this.hazards) {
+      let keep = true;
+      if (hazard.kind === 'bullet') {
+        keep = this.updateBullet(hazard, dt);
+      } else if (hazard.kind === 'bone-wall-h') {
+        keep = this.updateBoneWallH(hazard, dt);
+      } else if (hazard.kind === 'bone-wall-v') {
+        keep = this.updateBoneWallV(hazard, dt);
+      } else if (hazard.kind === 'blaster') {
+        keep = this.updateBlaster(hazard, dt);
+      }
+      if (keep) remaining.push(hazard);
+    }
+
+    this.hazards = remaining;
+  }
+
+  private updateBullet(hazard: BulletHazard, dt: number): boolean {
+    hazard.age += dt;
+
+    if (hazard.movement === 'sine') {
+      const perpX = -hazard.baseVy;
+      const perpY = hazard.baseVx;
+      const offset = Math.sin(hazard.age * hazard.sineFrequency) * hazard.sineAmplitude;
+      hazard.obj.x += hazard.baseVx * dt + perpX * offset * dt;
+      hazard.obj.y += hazard.baseVy * dt + perpY * offset * dt;
+    } else if (hazard.movement === 'homing') {
+      const dx = this.soul.x - hazard.obj.x;
+      const dy = this.soul.y - hazard.obj.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const speed = Math.hypot(hazard.baseVx, hazard.baseVy);
+      hazard.vx = Phaser.Math.Linear(hazard.vx, (dx / len) * speed, 40 * dt);
+      hazard.vy = Phaser.Math.Linear(hazard.vy, (dy / len) * speed, 40 * dt);
+      hazard.obj.x += hazard.vx * dt;
+      hazard.obj.y += hazard.vy * dt;
+    } else {
+      hazard.obj.x += hazard.baseVx * dt;
+      hazard.obj.y += hazard.baseVy * dt;
+    }
+
+    const bounds = this.arenaBounds;
+    const margin = 40;
+    const outOfBounds =
+      hazard.obj.x < bounds.x - margin ||
+      hazard.obj.x > bounds.x + bounds.width + margin ||
+      hazard.obj.y < bounds.y - margin ||
+      hazard.obj.y > bounds.y + bounds.height + margin;
+
+    if (outOfBounds) {
+      hazard.obj.destroy();
+      return false;
+    }
+
+    const dist = Phaser.Math.Distance.Between(hazard.obj.x, hazard.obj.y, this.soul.x, this.soul.y);
+    if (dist < BOSS_BULLET_RADIUS + BOSS_SOUL_RADIUS) {
+      this.tryDamageSoul(BOSS_HIT_STRESS, 0.006, 100);
+    }
+
+    return true;
+  }
+
+  private updateBoneWallH(hazard: BoneWallHHazard, dt: number): boolean {
+    hazard.y += hazard.speed * dt;
+    this.redrawBoneWallH(hazard);
+
+    const bounds = this.arenaBounds;
+    if (hazard.y > bounds.y + bounds.height + BOSS_BONE_THICKNESS) {
+      hazard.rects.forEach((rect) => rect.destroy());
+      return false;
+    }
+
+    const overlapsBand = Math.abs(this.soul.y - hazard.y) < BOSS_BONE_THICKNESS / 2 + BOSS_SOUL_RADIUS;
+    if (overlapsBand) {
+      if (hazard.colorMode === 'normal') {
+        const inGap = Math.abs(this.soul.x - hazard.gapCenterX) < hazard.gapSize / 2 - BOSS_SOUL_RADIUS;
+        if (!inGap) this.tryDamageSoul(BOSS_HIT_STRESS, 0.01, 150);
+      } else {
+        const safe = hazard.colorMode === 'blue' ? !this.isSoulMovingThisFrame : this.isSoulMovingThisFrame;
+        if (!safe) this.tryDamageSoul(BOSS_HIT_STRESS, 0.01, 150);
+      }
+    }
+
+    return true;
+  }
+
+  private updateBoneWallV(hazard: BoneWallVHazard, dt: number): boolean {
+    hazard.x += hazard.speed * dt;
+    this.redrawBoneWallV(hazard);
+
+    const bounds = this.arenaBounds;
+    if (hazard.x > bounds.x + bounds.width + BOSS_BONE_THICKNESS) {
+      hazard.rects.forEach((rect) => rect.destroy());
+      return false;
+    }
+
+    const overlapsBand = Math.abs(this.soul.x - hazard.x) < BOSS_BONE_THICKNESS / 2 + BOSS_SOUL_RADIUS;
+    if (overlapsBand) {
+      if (hazard.colorMode === 'normal') {
+        const inGap = Math.abs(this.soul.y - hazard.gapCenterY) < hazard.gapSize / 2 - BOSS_SOUL_RADIUS;
+        if (!inGap) this.tryDamageSoul(BOSS_HIT_STRESS, 0.01, 150);
+      } else {
+        const safe = hazard.colorMode === 'blue' ? !this.isSoulMovingThisFrame : this.isSoulMovingThisFrame;
+        if (!safe) this.tryDamageSoul(BOSS_HIT_STRESS, 0.01, 150);
+      }
+    }
+
+    return true;
+  }
+
+  private updateBlaster(hazard: BlasterHazard, dt: number): boolean {
+    hazard.stateElapsed += dt * 1000;
+
+    if (hazard.state === 'telegraph') {
+      if (hazard.stateElapsed >= hazard.telegraphMs) {
+        hazard.telegraphObj.destroy();
+        const bounds = this.arenaBounds;
+        hazard.beamObj =
+          hazard.orientation === 'horizontal'
+            ? this.add.rectangle(
+                bounds.x + bounds.width / 2,
+                hazard.position,
+                bounds.width,
+                hazard.thickness,
+                0xef4444,
+                0.9,
+              )
+            : this.add.rectangle(
+                hazard.position,
+                bounds.y + bounds.height / 2,
+                hazard.thickness,
+                bounds.height,
+                0xef4444,
+                0.9,
+              );
+        hazard.state = 'firing';
+        hazard.stateElapsed = 0;
+      }
+      return true;
+    }
+
+    const hit =
+      hazard.orientation === 'horizontal'
+        ? Math.abs(this.soul.y - hazard.position) < hazard.thickness / 2 + BOSS_SOUL_RADIUS
+        : Math.abs(this.soul.x - hazard.position) < hazard.thickness / 2 + BOSS_SOUL_RADIUS;
+
+    if (hit) {
+      this.tryDamageSoul(BOSS_HIT_STRESS, 0.02, 300);
+    }
+
+    if (hazard.stateElapsed >= hazard.beamMs) {
+      hazard.beamObj?.destroy();
+      return false;
+    }
+    return true;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Спавн опасностей
+   * ────────────────────────────────────────────────────────────────── */
+
+  private spawnBullet(movement: BulletMovement): void {
+    const bounds = this.arenaBounds;
+    const edge = Phaser.Math.Between(0, 3);
+    let x = bounds.x + bounds.width / 2;
+    let y = bounds.y + bounds.height / 2;
+
+    if (edge === 0) {
+      x = bounds.x - 10;
+      y = Phaser.Math.Between(bounds.y, bounds.y + bounds.height);
+    } else if (edge === 1) {
+      x = bounds.x + bounds.width + 10;
+      y = Phaser.Math.Between(bounds.y, bounds.y + bounds.height);
+    } else if (edge === 2) {
+      y = bounds.y - 10;
+      x = Phaser.Math.Between(bounds.x, bounds.x + bounds.width);
+    } else {
+      y = bounds.y + bounds.height + 10;
+      x = Phaser.Math.Between(bounds.x, bounds.x + bounds.width);
+    }
+
+    const targetX = bounds.x + bounds.width / 2;
+    const targetY = bounds.y + bounds.height / 2;
+    const angle = Phaser.Math.Angle.Between(x, y, targetX, targetY);
+    const speed = 130;
+    const baseVx = Math.cos(angle) * speed;
+    const baseVy = Math.sin(angle) * speed;
+
+    const obj = this.add.circle(x, y, BOSS_BULLET_RADIUS, 0xfbbf24);
+
+    this.hazards.push({
+      kind: 'bullet',
+      obj,
+      movement,
+      age: 0,
+      baseVx,
+      baseVy,
+      vx: baseVx,
+      vy: baseVy,
+      sineAmplitude: 1.4,
+      sineFrequency: 4,
+    });
+  }
+
+  private boneColorFor(colorMode: BoneColorMode): number {
+    if (colorMode === 'blue') return BOSS_BONE_COLOR_BLUE;
+    if (colorMode === 'orange') return BOSS_BONE_COLOR_ORANGE;
     return BOSS_BONE_COLOR_NORMAL;
   }
 
-  private spawnBoneWallV(gapRatio: number, fromLeft: boolean, colorMode: BoneColorMode): void {
+  private spawnBoneWallH(startOffset: number, colorMode: BoneColorMode): void {
+    const bounds = this.arenaBounds;
     const gapSize = BOSS_BONE_GAP_SIZE;
-    const gapCenter = this.boxTop + gapRatio * BOSS_BOX_HEIGHT;
-    const gapTop = Phaser.Math.Clamp(gapCenter - gapSize / 2, this.boxTop, this.boxBottom - gapSize);
-    const gapBottom = gapTop + gapSize;
-    const startX = fromLeft ? this.boxLeft - 40 : this.boxRight + 40;
-    const vx = fromLeft ? BOSS_BONE_SPEED : -BOSS_BONE_SPEED;
-    const color = this.boneColor(colorMode);
+    const gapCenterX = Phaser.Math.Between(bounds.x + gapSize, bounds.x + bounds.width - gapSize);
+    const color = this.boneColorFor(colorMode);
 
-    const topHeight = Math.max(gapTop - this.boxTop, 1);
-    const bottomHeight = Math.max(this.boxBottom - gapBottom, 1);
+    const hazard: BoneWallHHazard = {
+      kind: 'bone-wall-h',
+      rects: [this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color), this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color)],
+      y: bounds.y + startOffset,
+      gapCenterX,
+      gapSize,
+      speed: BOSS_BONE_SPEED,
+      colorMode,
+    };
 
-    const segTop = this.add.rectangle(startX, this.boxTop + topHeight / 2, BOSS_BONE_THICKNESS, topHeight, color);
-    const segBottom = this.add.rectangle(startX, gapBottom + bottomHeight / 2, BOSS_BONE_THICKNESS, bottomHeight, color);
-
-    this.hazards.push({ kind: 'boneWallV', segTop, segBottom, x: startX, vx, gapTop, gapBottom, colorMode });
+    this.redrawBoneWallH(hazard);
+    this.hazards.push(hazard);
   }
 
-  private spawnBoneWallH(gapRatio: number, fromTop: boolean, colorMode: BoneColorMode): void {
+  private spawnBoneWallV(startOffset: number, colorMode: BoneColorMode): void {
+    const bounds = this.arenaBounds;
     const gapSize = BOSS_BONE_GAP_SIZE;
-    const gapCenter = this.boxLeft + gapRatio * BOSS_BOX_WIDTH;
-    const gapLeft = Phaser.Math.Clamp(gapCenter - gapSize / 2, this.boxLeft, this.boxRight - gapSize);
-    const gapRight = gapLeft + gapSize;
-    const startY = fromTop ? this.boxTop - 40 : this.boxBottom + 40;
-    const vy = fromTop ? BOSS_BONE_SPEED : -BOSS_BONE_SPEED;
-    const color = this.boneColor(colorMode);
+    const gapCenterY = Phaser.Math.Between(bounds.y + gapSize, bounds.y + bounds.height - gapSize);
+    const color = this.boneColorFor(colorMode);
 
-    const leftWidth = Math.max(gapLeft - this.boxLeft, 1);
-    const rightWidth = Math.max(this.boxRight - gapRight, 1);
+    const hazard: BoneWallVHazard = {
+      kind: 'bone-wall-v',
+      rects: [this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color), this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color)],
+      x: bounds.x + startOffset,
+      gapCenterY,
+      gapSize,
+      speed: BOSS_BONE_SPEED,
+      colorMode,
+    };
 
-    const segLeft = this.add.rectangle(this.boxLeft + leftWidth / 2, startY, leftWidth, BOSS_BONE_THICKNESS, color);
-    const segRight = this.add.rectangle(gapRight + rightWidth / 2, startY, rightWidth, BOSS_BONE_THICKNESS, color);
-
-    this.hazards.push({ kind: 'boneWallH', segLeft, segRight, y: startY, vy, gapLeft, gapRight, colorMode });
+    this.redrawBoneWallV(hazard);
+    this.hazards.push(hazard);
   }
 
-  private spawnBlaster(orientation: 'horizontal' | 'vertical', positionRatio: number): void {
-    let telegraphObj: Phaser.GameObjects.Rectangle;
-    let position: number;
+  private redrawBoneWallH(hazard: BoneWallHHazard): void {
+    const bounds = this.arenaBounds;
+    const gapLeft = hazard.gapCenterX - hazard.gapSize / 2;
+    const gapRight = hazard.gapCenterX + hazard.gapSize / 2;
 
-    if (orientation === 'horizontal') {
-      position = this.boxTop + positionRatio * BOSS_BOX_HEIGHT;
-      telegraphObj = this.add.rectangle((this.boxLeft + this.boxRight) / 2, position, BOSS_BOX_WIDTH, 4, 0xef4444, 0.6);
-    } else {
-      position = this.boxLeft + positionRatio * BOSS_BOX_WIDTH;
-      telegraphObj = this.add.rectangle(position, (this.boxTop + this.boxBottom) / 2, 4, BOSS_BOX_HEIGHT, 0xef4444, 0.6);
-    }
+    const leftWidth = Math.max(0, gapLeft - bounds.x);
+    const rightWidth = Math.max(0, bounds.x + bounds.width - gapRight);
+
+    const [leftRect, rightRect] = hazard.rects;
+    leftRect.setPosition(bounds.x + leftWidth / 2, hazard.y);
+    leftRect.setSize(leftWidth, BOSS_BONE_THICKNESS);
+
+    rightRect.setPosition(gapRight + rightWidth / 2, hazard.y);
+    rightRect.setSize(rightWidth, BOSS_BONE_THICKNESS);
+  }
+
+  private redrawBoneWallV(hazard: BoneWallVHazard): void {
+    const bounds = this.arenaBounds;
+    const gapTop = hazard.gapCenterY - hazard.gapSize / 2;
+    const gapBottom = hazard.gapCenterY + hazard.gapSize / 2;
+
+    const topHeight = Math.max(0, gapTop - bounds.y);
+    const bottomHeight = Math.max(0, bounds.y + bounds.height - gapBottom);
+
+    const [topRect, bottomRect] = hazard.rects;
+    topRect.setPosition(hazard.x, bounds.y + topHeight / 2);
+    topRect.setSize(BOSS_BONE_THICKNESS, topHeight);
+
+    bottomRect.setPosition(hazard.x, gapBottom + bottomHeight / 2);
+    bottomRect.setSize(BOSS_BONE_THICKNESS, bottomHeight);
+  }
+
+  private spawnBlaster(orientation: 'horizontal' | 'vertical', position: number): void {
+    const bounds = this.arenaBounds;
+    const thickness = BOSS_BLASTER_THICKNESS;
+
+    const telegraphObj =
+      orientation === 'horizontal'
+        ? this.add.rectangle(bounds.x + bounds.width / 2, position, bounds.width, thickness, 0xf87171, 0.35)
+        : this.add.rectangle(position, bounds.y + bounds.height / 2, thickness, bounds.height, 0xf87171, 0.35);
 
     this.hazards.push({
       kind: 'blaster',
       orientation,
-      position,
       telegraphObj,
-      beamObj: null,
+      position,
       state: 'telegraph',
-      elapsedMs: 0,
+      stateElapsed: 0,
+      telegraphMs: BOSS_BLASTER_TELEGRAPH_MS,
+      beamMs: BOSS_BLASTER_BEAM_MS,
+      thickness,
     });
   }
 
-  // --- Обновление опасностей ----------------------------------------------------
+  /* ──────────────────────────────────────────────────────────────────
+   * Победа / поражение
+   * ────────────────────────────────────────────────────────────────── */
 
-  private isOutOfBox(x: number, y: number): boolean {
-    return (
-      x < this.boxLeft - 60 || x > this.boxRight + 60 || y < this.boxTop - 60 || y > this.boxBottom + 60
-    );
-  }
-
-  private updateBulletPosition(h: BulletHazard, dt: number): void {
-    switch (h.pattern) {
-      case 'straight':
-        h.x += h.vx * dt;
-        h.y += h.vy * dt;
-        break;
-      case 'sine': {
-        h.sineOffset += dt * 5;
-        const wobble = Math.sin(h.sineOffset) * 25;
-        if (h.vx !== 0) {
-          h.x += h.vx * dt;
-          h.y = h.baseY + wobble;
-        } else {
-          h.y += h.vy * dt;
-          h.x = h.baseX + wobble;
-        }
-        break;
-      }
-      case 'homing': {
-        const angle = Phaser.Math.Angle.Between(h.x, h.y, this.soulX, this.soulY);
-        h.vx = Math.cos(angle) * h.speed;
-        h.vy = Math.sin(angle) * h.speed;
-        h.x += h.vx * dt;
-        h.y += h.vy * dt;
-        break;
-      }
-    }
-    h.obj.setPosition(h.x, h.y);
-  }
-
-  private updateHazards(dt: number, deltaMs: number): void {
-    const isMoving = this.isSoulMovingThisFrame;
-
-    for (let i = this.hazards.length - 1; i >= 0; i--) {
-      const h = this.hazards[i];
-
-      if (h.kind === 'bullet') {
-        this.updateBulletPosition(h, dt);
-        if (this.isOutOfBox(h.x, h.y)) {
-          h.obj.destroy();
-          this.hazards.splice(i, 1);
-          continue;
-        }
-        if (!this.isInvulnerable) {
-          const dist = Phaser.Math.Distance.Between(h.x, h.y, this.soulX, this.soulY);
-          if (dist < BOSS_SOUL_RADIUS + BOSS_BULLET_RADIUS) {
-            this.applyHitDamage(0.006, 100);
-            h.obj.destroy();
-            this.hazards.splice(i, 1);
-          }
-        }
-        continue;
-      }
-
-      if (h.kind === 'boneWallV') {
-        h.x += h.vx * dt;
-        h.segTop.x = h.x;
-        h.segBottom.x = h.x;
-        if (h.x < this.boxLeft - 80 || h.x > this.boxRight + 80) {
-          h.segTop.destroy();
-          h.segBottom.destroy();
-          this.hazards.splice(i, 1);
-          continue;
-        }
-        if (!this.isInvulnerable) {
-          const withinX = Math.abs(this.soulX - h.x) < BOSS_BONE_THICKNESS / 2 + BOSS_SOUL_RADIUS;
-          const insideGap =
-            this.soulY > h.gapTop + BOSS_SOUL_RADIUS && this.soulY < h.gapBottom - BOSS_SOUL_RADIUS;
-          const colorSafe =
-            (h.colorMode === 'blue' && !isMoving) || (h.colorMode === 'orange' && isMoving);
-          if (withinX && !insideGap && !colorSafe) this.applyHitDamage(0.01, 150);
-        }
-        continue;
-      }
-
-      if (h.kind === 'boneWallH') {
-        h.y += h.vy * dt;
-        h.segLeft.y = h.y;
-        h.segRight.y = h.y;
-        if (h.y < this.boxTop - 80 || h.y > this.boxBottom + 80) {
-          h.segLeft.destroy();
-          h.segRight.destroy();
-          this.hazards.splice(i, 1);
-          continue;
-        }
-        if (!this.isInvulnerable) {
-          const withinY = Math.abs(this.soulY - h.y) < BOSS_BONE_THICKNESS / 2 + BOSS_SOUL_RADIUS;
-          const insideGap =
-            this.soulX > h.gapLeft + BOSS_SOUL_RADIUS && this.soulX < h.gapRight - BOSS_SOUL_RADIUS;
-          const colorSafe =
-            (h.colorMode === 'blue' && !isMoving) || (h.colorMode === 'orange' && isMoving);
-          if (withinY && !insideGap && !colorSafe) this.applyHitDamage(0.01, 150);
-        }
-        continue;
-      }
-
-      h.elapsedMs += deltaMs;
-      if (h.state === 'telegraph' && h.elapsedMs >= BOSS_BLASTER_TELEGRAPH_MS) {
-        h.telegraphObj.destroy();
-        const thickness = BOSS_BLASTER_THICKNESS;
-        if (h.orientation === 'horizontal') {
-          h.beamObj = this.add.rectangle(
-            (this.boxLeft + this.boxRight) / 2,
-            h.position,
-            BOSS_BOX_WIDTH,
-            thickness,
-            0xff4040,
-            0.9
-          );
-        } else {
-          h.beamObj = this.add.rectangle(
-            h.position,
-            (this.boxTop + this.boxBottom) / 2,
-            thickness,
-            BOSS_BOX_HEIGHT,
-            0xff4040,
-            0.9
-          );
-        }
-        h.state = 'firing';
-        h.elapsedMs = 0;
-
-        if (!this.isInvulnerable) {
-          const hit =
-            h.orientation === 'horizontal'
-              ? Math.abs(this.soulY - h.position) < thickness / 2 + BOSS_SOUL_RADIUS
-              : Math.abs(this.soulX - h.position) < thickness / 2 + BOSS_SOUL_RADIUS;
-          if (hit) this.applyHitDamage(0.02, 300);
-        }
-      } else if (h.state === 'firing' && h.elapsedMs >= BOSS_BLASTER_BEAM_MS) {
-        h.beamObj?.destroy();
-        this.hazards.splice(i, 1);
-      }
-    }
-  }
-
-  private applyHitDamage(shakeIntensity: number = 0.01, shakeDuration: number = 150): void {
-    this.stressLevel = Math.min(STRESS_BAR_MAX, this.stressLevel + BOSS_HIT_STRESS);
-    this.updateStressBar();
-    this.cameras.main.shake(shakeDuration, shakeIntensity);
-
-    this.isInvulnerable = true;
-
-    const halfCycles = 8;
-    const halfCycleDuration = BOSS_INVULNERABILITY_MS / halfCycles;
-
-    this.soulSprite.setAlpha(1);
-    this.tweens.add({
-      targets: this.soulSprite,
-      alpha: 0.2,
-      duration: halfCycleDuration,
-      yoyo: true,
-      repeat: halfCycles / 2 - 1,
-      onComplete: () => this.soulSprite.setAlpha(1),
-    });
-
-    this.time.delayedCall(BOSS_INVULNERABILITY_MS, () => {
-      this.isInvulnerable = false;
-      this.soulSprite.setAlpha(1);
-    });
-
-    if (this.stressLevel >= STRESS_BAR_MAX) this.handleGameFail();
-  }
-
-  private clearHazards(): void {
-    this.hazards.forEach((h) => {
-      if (h.kind === 'bullet') h.obj.destroy();
-      else if (h.kind === 'boneWallV') {
-        h.segTop.destroy();
-        h.segBottom.destroy();
-      } else if (h.kind === 'boneWallH') {
-        h.segLeft.destroy();
-        h.segRight.destroy();
-      } else {
-        h.telegraphObj.destroy();
-        h.beamObj?.destroy();
-      }
-    });
-    this.hazards = [];
-  }
-
-  private clearScheduledEvents(): void {
-    this.scheduledEvents.forEach((e) => e.remove());
-    this.scheduledEvents = [];
-  }
-
-  // --- Волны ---------------------------------------------------------------------
-
-  private startWave(index: number): void {
-    this.currentWaveIndex = index;
+  private handleVictory(): void {
     this.clearHazards();
-    this.clearScheduledEvents();
-    const wave = WAVES[index];
-    this.waveLabel.setText(`Волна ${index + 1}/${WAVES.length}`);
-
-    this.showBossDialogue(wave.title, wave.masyaTip, () => {
-      wave.spawns.forEach((spawn) => {
-        const ev = this.time.delayedCall(spawn.delayMs, () => {
-          if (this.isGameOver) return;
-          if (spawn.kind === 'bullet') this.spawnBullet(spawn.side, spawn.speed, spawn.pattern);
-          else if (spawn.kind === 'boneWallV') this.spawnBoneWallV(spawn.gapRatio, spawn.fromLeft, spawn.colorMode);
-          else if (spawn.kind === 'boneWallH') this.spawnBoneWallH(spawn.gapRatio, spawn.fromTop, spawn.colorMode);
-          else this.spawnBlaster(spawn.orientation, spawn.positionRatio);
-        });
-        this.scheduledEvents.push(ev);
-      });
-
-      wave.captions.forEach((cap) => {
-        const ev = this.time.delayedCall(cap.atMs, () => this.showCaption(cap.text, cap.durationMs));
-        this.scheduledEvents.push(ev);
-      });
-
-      if (wave.wordChallenges && wave.wordChallenges.length > 0) {
-        const challenges = wave.wordChallenges;
-        const step = wave.durationMs / (challenges.length + 1);
-        challenges.forEach((challenge, i) => {
-          const ev = this.time.delayedCall(step * (i + 1), () => this.showWordChallenge(challenge));
-          this.scheduledEvents.push(ev);
-        });
-      }
-
-      const endEv = this.time.delayedCall(wave.durationMs, () => this.onWaveComplete());
-      this.scheduledEvents.push(endEv);
-    });
-  }
-
-  private onWaveComplete(): void {
-    if (this.isGameOver) return;
-    this.clearHazards();
-    this.stressLevel = Math.max(0, this.stressLevel - BOSS_WAVE_BREATHER_RELIEF);
-    this.updateStressBar();
-
-    if (this.currentWaveIndex >= WAVES.length - 1) {
-      this.showFinalResults();
-    } else {
-      this.startWave(this.currentWaveIndex + 1);
-    }
-  }
-
-  private showBossDialogue(title: string, tip: string, onDone: () => void): void {
-    this.statusText.setText(title).setColor('#fbbf24');
-    this.continueIndicator.setVisible(false);
-
-    const fullText = tip;
-    let typingComplete = false;
-
-    const proceed = () => {
-      if (this.activeDialogueSkipHandler) {
-        this.input.keyboard?.off('keydown', this.activeDialogueSkipHandler);
-        this.activeDialogueSkipHandler = null;
-      }
-      this.topPanelBg.off('pointerdown', onPanelClick);
-      this.continueIndicator.setVisible(false);
-      onDone();
-    };
-
-    const onPanelClick = () => {
-      if (typingComplete) proceed();
-    };
-
-    const skipHandler = (event: KeyboardEvent) => {
-      if (event.repeat) return;
-      if (event.code !== 'Space') return;
-      if (!typingComplete) {
-        typingComplete = true;
-        this.dialogueText.setText(fullText);
-        this.continueIndicator.setVisible(true);
-      } else {
-        proceed();
-      }
-    };
-
-    this.activeDialogueSkipHandler = skipHandler;
-    this.input.keyboard?.on('keydown', skipHandler);
-    this.topPanelBg.setInteractive({ useHandCursor: true });
-    this.topPanelBg.on('pointerdown', onPanelClick);
-
-    this.runTypewriter(this.dialogueText, fullText, BOSS_TYPEWRITER_MS, () => {
-      typingComplete = true;
-      this.continueIndicator.setVisible(true);
-    });
-  }
-
-  private showWordChallenge(challenge: WordChallenge): void {
-    if (this.isGameOver) return;
     this.isCodeChallengeActive = true;
 
-    const panelY = (this.boxTop + this.boxBottom) / 2;
-    const panelX = GAME_WIDTH / 2;
-
-    const panelBg = this.add
-      .rectangle(panelX, panelY, 300, 110, 0x0f172a, 0.97)
-      .setStrokeStyle(3, 0xfbbf24)
-      .setDepth(170);
-    const hintText = this.add
-      .text(panelX, panelY - 34, 'Напечатай слово:', {
-        fontFamily: 'monospace',
-        fontSize: '13px',
-        color: '#94a3b8',
-      })
-      .setOrigin(0.5)
-      .setDepth(171);
-
-    const letters = challenge.word.split('');
-    const letterSpacing = 26;
-    const startX = panelX - ((letters.length - 1) * letterSpacing) / 2;
-    const letterObjs: Phaser.GameObjects.Text[] = letters.map((ch, i) =>
-      this.add
-        .text(startX + i * letterSpacing, panelY - 5, ch.toUpperCase(), {
-          fontFamily: 'monospace',
-          fontSize: '22px',
-          color: '#64748b',
-          fontStyle: 'bold',
-        })
-        .setOrigin(0.5)
-        .setDepth(171)
-    );
-
-    const timerBarWidth = 220;
-    const timerBarBg = this.add
-      .rectangle(panelX, panelY + 30, timerBarWidth, 8, 0x374151)
-      .setDepth(170);
-    const timerBarFill = this.add
-      .rectangle(panelX - timerBarWidth / 2, panelY + 30, timerBarWidth, 8, 0xfbbf24)
-      .setOrigin(0, 0.5)
-      .setDepth(171);
-
-    let typedIndex = 0;
-    let resolved = false;
-
-    const allPanelObjects = [panelBg, hintText, ...letterObjs, timerBarBg, timerBarFill];
-    allPanelObjects.forEach((obj) => obj.setScale(0.3).setAlpha(0));
-    this.tweens.add({
-      targets: allPanelObjects,
-      scale: 1,
-      alpha: 1,
-      duration: 220,
-      ease: 'Back.easeOut',
-    });
-
-    const timerTween = this.tweens.add({
-      targets: timerBarFill,
-      width: 0,
-      duration: challenge.timeLimitMs,
-      onComplete: () => finish(false),
-    });
-
-    const cleanupUI = () => {
-      panelBg.destroy();
-      hintText.destroy();
-      letterObjs.forEach((o) => o.destroy());
-      timerBarBg.destroy();
-      timerBarFill.destroy();
-      timerTween.remove();
-      if (this.activeWordKeyHandler) {
-        this.input.keyboard?.off('keydown', this.activeWordKeyHandler);
-        this.activeWordKeyHandler = null;
-      }
-    };
-
-    const finish = (success: boolean) => {
-      if (resolved) return;
-      resolved = true;
-      cleanupUI();
-
-      if (success) {
-        this.stressLevel = Math.max(0, this.stressLevel - BOSS_WORD_CHALLENGE_RELIEF);
-        this.updateStressBar();
-        this.cameras.main.flash(120, 74, 222, 128);
-        this.runAutopilotReward(challenge.codeSnippet, () => {
-          this.isCodeChallengeActive = false;
-        });
-      } else {
-        this.stressLevel = Math.min(STRESS_BAR_MAX, this.stressLevel + BOSS_WORD_CHALLENGE_FAIL_STRESS);
-        this.updateStressBar();
-        this.cameras.main.shake(200, 0.008);
-        this.isCodeChallengeActive = false;
-        if (this.stressLevel >= STRESS_BAR_MAX) this.handleGameFail();
-      }
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return;
-      const expected = challenge.word[typedIndex]?.toLowerCase();
-      if (!expected) return;
-      const pressed = event.key.toLowerCase();
-      if (pressed === expected) {
-        letterObjs[typedIndex].setColor('#4ade80');
-        typedIndex++;
-        if (typedIndex >= challenge.word.length) finish(true);
-      } else if (pressed.length === 1) {
-        this.cameras.main.shake(70, 0.002);
-      }
-    };
-
-    this.activeWordKeyHandler = onKeyDown;
-    this.input.keyboard?.on('keydown', onKeyDown);
-  }
-
-  private runAutopilotReward(codeSnippet: string, onComplete: () => void): void {
-    this.showCaption('', 999999);
-    this.runTypewriter(this.captionText, `> ${codeSnippet}`, BOSS_CODE_TYPEWRITER_MS, () => {
-      this.captionBg.setAlpha(0.85);
-
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 90;
-      const targetX = Phaser.Math.Clamp(
-        this.soulX + Math.cos(angle) * dist,
-        this.boxLeft + BOSS_SOUL_RADIUS + 10,
-        this.boxRight - BOSS_SOUL_RADIUS - 10
-      );
-      const targetY = Phaser.Math.Clamp(
-        this.soulY + Math.sin(angle) * dist,
-        this.boxTop + BOSS_SOUL_RADIUS + 10,
-        this.boxBottom - BOSS_SOUL_RADIUS - 10
-      );
-
-      const proxy = { x: this.soulX, y: this.soulY };
-      this.tweens.add({
-        targets: proxy,
-        x: targetX,
-        y: targetY,
-        duration: BOSS_AUTOPILOT_MS,
-        ease: 'Sine.easeInOut',
-        onUpdate: () => {
-          this.soulX = proxy.x;
-          this.soulY = proxy.y;
-          this.soulSprite.setPosition(this.soulX, this.soulY);
-        },
-        onComplete: () => {
-          this.time.delayedCall(300, () => {
-            if (this.captionTween) this.captionTween.remove();
-            this.captionTween = this.tweens.add({
-              targets: [this.captionBg, this.captionText],
-              alpha: 0,
-              duration: 300,
-            });
-            onComplete();
-          });
-        },
-      });
-    });
-  }
-
-  // --- Исходы боя ------------------------------------------------------------------
-
-  private handleGameFail(): void {
-    this.isGameOver = true;
-    this.clearScheduledEvents();
-    this.statusText.setText('ПОЙМАЛА УРОН! Чит не сработал.');
-    this.cameras.main.shake(500, 0.01);
-    this.time.delayedCall(1200, () => this.showGameOverScreen());
-  }
-
-  private showGameOverScreen(): void {
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.85).setOrigin(0, 0).setDepth(200);
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, 'БОЙ ПРОВАЛЕН', {
-        fontFamily: 'monospace',
-        fontSize: '32px',
-        color: '#ef4444',
-      })
-      .setOrigin(0.5)
-      .setDepth(201);
-
-    const retry = this.add
-      .rectangle(GAME_WIDTH / 2 - 120, GAME_HEIGHT / 2 + 40, 200, 40, 0x2563eb)
-      .setDepth(201)
-      .setInteractive();
-    this.add
-      .text(GAME_WIDTH / 2 - 120, GAME_HEIGHT / 2 + 40, 'Пройти заново', {
-        fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#fff',
-      })
-      .setOrigin(0.5)
-      .setDepth(202);
-    retry.on('pointerdown', () => {
-      this.scene.restart({ attempts: this.attempts + 1 });
-    });
-
-    const exit = this.add
-      .rectangle(GAME_WIDTH / 2 + 120, GAME_HEIGHT / 2 + 40, 200, 40, 0x374151)
-      .setDepth(201)
-      .setInteractive();
-    this.add
-      .text(GAME_WIDTH / 2 + 120, GAME_HEIGHT / 2 + 40, 'В меню', {
-        fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#fff',
-      })
-      .setOrigin(0.5)
-      .setDepth(202);
-    exit.on('pointerdown', () => {
-      this.game.events.emit('minigame-exit');
-      this.scene.stop();
-    });
-  }
-
-  private showFinalResults(): void {
-    this.isGameOver = true;
-    this.clearScheduledEvents();
-    this.clearHazards();
-
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.85).setOrigin(0, 0).setDepth(200);
     const score = Math.max(0, 1000 - this.stressLevel * 5 - (this.attempts - 1) * 200);
 
+    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.75).setDepth(300);
+
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60, 'ЧИТ НАПИСАН! БОСС ПОВЕРЖЕН!', {
-        fontFamily: 'monospace',
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60, 'Ты прошла боссфайт!', {
         fontSize: '28px',
         color: '#4ade80',
+        fontStyle: 'bold',
       })
       .setOrigin(0.5)
-      .setDepth(201);
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 10, `Счёт: ${score} | Попыток: ${this.attempts}`, {
-        fontFamily: 'monospace',
-        fontSize: '18px',
-        color: '#fff',
-      })
-      .setOrigin(0.5)
-      .setDepth(201);
+      .setDepth(301);
 
-    const btn = this.add
-      .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 60, 200, 44, 0x2563eb)
-      .setDepth(201)
-      .setInteractive();
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 60, 'Завершить', {
-        fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#fff',
+      .text(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2 - 10,
+        `Очки: ${score}\nПопытки: ${this.attempts}\nСтресс: ${this.stressLevel}`,
+        { fontSize: '16px', color: '#e2e8f0', align: 'center' },
+      )
+      .setOrigin(0.5)
+      .setDepth(301);
+
+    const finishButton = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70, 'Завершить', {
+        fontSize: '18px',
+        color: '#0f172a',
+        backgroundColor: '#4ade80',
+        padding: { x: 16, y: 8 },
       })
       .setOrigin(0.5)
-      .setDepth(202);
-    btn.on('pointerdown', () => {
+      .setDepth(301)
+      .setInteractive({ useHandCursor: true });
+
+    finishButton.on('pointerdown', () => {
       this.game.events.emit('minigame-complete', {
         minigameType: 'builder',
         score,
@@ -1229,32 +1283,71 @@ export class UiMinigameScene extends Phaser.Scene {
     });
   }
 
-  private updateStressBar(): void {
-    const targetWidth = STRESS_BAR_WIDTH * (this.stressLevel / STRESS_BAR_MAX);
-    this.tweens.add({
-      targets: this.stressBarFill,
-      width: targetWidth,
-      duration: 250,
-      ease: 'Cubic.easeOut',
-    });
+  private handleDefeat(): void {
+    this.clearHazards();
+    this.isCodeChallengeActive = true;
+
+    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.8).setDepth(300);
+
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, 'Стресс зашкалил...', {
+        fontSize: '26px',
+        color: '#f87171',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5)
+      .setDepth(301);
+
+    const exitToHub = (): void => {
+      this.game.events.emit('minigame-exit');
+      this.scene.stop();
+    };
+
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, '← Сдаться', {
+        fontSize: '16px',
+        color: '#0f172a',
+        backgroundColor: '#f87171',
+        padding: { x: 14, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(301)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', exitToHub);
+
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70, 'В меню', {
+        fontSize: '16px',
+        color: '#e2e8f0',
+        backgroundColor: '#334155',
+        padding: { x: 14, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(301)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', exitToHub);
   }
 
+  /* ──────────────────────────────────────────────────────────────────
+   * Очистка при выходе со сцены
+   * ────────────────────────────────────────────────────────────────── */
+
   private cleanup(): void {
-    this.clearScheduledEvents();
-    this.clearHazards();
     if (this.activeWordKeyHandler) {
-      this.input.keyboard?.off('keydown', this.activeWordKeyHandler);
+      window.removeEventListener('keydown', this.activeWordKeyHandler);
       this.activeWordKeyHandler = null;
     }
-    if (this.activeDialogueSkipHandler) {
-      this.input.keyboard?.off('keydown', this.activeDialogueSkipHandler);
-      this.activeDialogueSkipHandler = null;
-    }
-    this.activeTypewriterTimers.forEach((t) => t.remove());
+    this.scheduledEvents.forEach((event) => event.remove(false));
+    this.scheduledEvents = [];
+    this.activeTypewriterTimers.forEach((timer) => timer.remove(false));
     this.activeTypewriterTimers = [];
-    if (this.captionTween) {
-      this.captionTween.remove();
-      this.captionTween = null;
-    }
+    this.hazards.forEach((hazard) => this.destroyHazardObjects(hazard));
+    this.hazards = [];
+    this.captionTween?.stop();
+    this.shieldRing?.destroy();
+    this.shieldRing = undefined;
+    this.isInvisible = false;
+    this.hasShield = false;
+    this.input.keyboard?.removeAllListeners('keydown-SPACE');
   }
 }

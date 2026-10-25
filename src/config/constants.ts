@@ -231,6 +231,11 @@ export const BOSS_BLASTER_TELEGRAPH_MS = 850; // время предупрежд
 export const BOSS_BLASTER_BEAM_MS = 300;      // время существования самого луча
 export const BOSS_BLASTER_THICKNESS = 55;     // толщина луча, px
 export const BOSS_CAPTION_FADE_MS = 2200;     // через сколько гаснет сноска с кодом
+export const BOSS_INVISIBLE_DURATION_MS = 1600;
+export const BOSS_LOOP_PATTERN_DURATION_MS = 1800;
+export const BOSS_SHIELD_DURATION_MS = 6000;
+export const BOSS_SHIELD_RING_COLOR = 0x34d399;
+export const BOSS_CHEAT_DECLARE_FREEZE_MS = 400;
 // ---------------------------------------------------------------------------
 // Константы мини-игры "Алгоритмика" (Робот-курьер)
 // ---------------------------------------------------------------------------
