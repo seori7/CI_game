@@ -347,6 +347,7 @@ export class HubScene extends Phaser.Scene {
     this.hintText.setText('');
     this.scene.launch('DialogueScene', {
       npcId: npc.npcId,
+      npcDisplayName: npc.displayName,
       dialogueStoryPath: npc.dialogueStoryPath,
     });
   }

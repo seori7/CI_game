@@ -34,6 +34,7 @@ const STORY_REGISTRY: Record<string, object> = {
 /** Данные, передаваемые в сцену при scene.launch(). */
 interface DialogueSceneData {
   npcId: string;
+  npcDisplayName?: string;
   dialogueStoryPath: string;
 }
 
@@ -48,6 +49,7 @@ interface DialogueSceneData {
 export class DialogueScene extends Phaser.Scene {
   private dialogueManager: DialogueManager | null = null;
   private npcId = '';
+  private npcDisplayName = '';
 
   private boxGraphics: Phaser.GameObjects.Graphics | null = null;
   private bodyText: Phaser.GameObjects.Text | null = null;
@@ -69,6 +71,7 @@ export class DialogueScene extends Phaser.Scene {
    */
   public create(data: DialogueSceneData): void {
     this.npcId = data.npcId;
+    this.npcDisplayName = data.npcDisplayName ?? data.npcId;
     const storyJson = STORY_REGISTRY[data.dialogueStoryPath];
     if (storyJson === undefined) {
       console.error(`[DialogueScene] История "${data.dialogueStoryPath}" не найдена в реестре.`);
@@ -93,7 +96,7 @@ export class DialogueScene extends Phaser.Scene {
     this.boxGraphics.lineStyle(2, 0x4fd1c5, 1);
     this.boxGraphics.strokeRect(0, boxY, GAME_WIDTH, DIALOGUE_BOX_HEIGHT);
 
-    this.add.text(DIALOGUE_BOX_PADDING, boxY + DIALOGUE_NAME_OFFSET_Y, this.npcId.toUpperCase(), {
+    this.add.text(DIALOGUE_BOX_PADDING, boxY + DIALOGUE_NAME_OFFSET_Y, this.npcDisplayName.toUpperCase(), {
       fontFamily: 'monospace',
       fontSize: '14px',
       color: '#4fd1c5',

@@ -257,10 +257,18 @@ export const BOSS_BONE_COLOR_ORANGE = 0xf97316;
 
 // --- Мини-игра "Печать слова" + автопилот-награда ---------------------------
 export const BOSS_WORD_CHALLENGE_RELIEF = 18;
-export const BOSS_WORD_CHALLENGE_FAIL_STRESS = 15;
 export const BOSS_AUTOPILOT_MS = 900;
 export const BOSS_ARENA_TOP_ROW_HEIGHT = 50; // резерв под заголовок/кнопку "Сдаться"
 export const BOSS_ARENA_FOOTER_HEIGHT = 50;  // резерв под статус-текст снизу
+
+export const BOSS_DIALOGUE_AUTO_ADVANCE_MS = 2500;
+export const BOSS_DIM_OVERLAY_ALPHA = 0.6;
+export const BOSS_DIM_FADE_MS = 450;
+export const BOSS_BEAT_BREATHER_MS = 450;
+export const BOSS_DODGE_PUSH_DISTANCE = 70;
+export const BOSS_INTRO_COUNTDOWN_MS = 3000;
+export const BOSS_BULLET_MAX_AGE_MS = 6000;
+export const BOSS_BEAT_SAFETY_TIMEOUT_MS = 9000;
 
 /** Карты города (3 уровня). 0=пусто, 1=пробка, 2=Старт, 3=Финиш */
 export const DRONE_LEVEL_MAPS = [

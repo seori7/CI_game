@@ -22,14 +22,12 @@ import {
   BOSS_CAPTION_FADE_MS,
   BOSS_TOP_PANEL_WIDTH,
   BOSS_TOP_PANEL_HEIGHT,
-  BOSS_PORTRAIT_SIZE,
   BOSS_TYPEWRITER_MS,
   BOSS_CODE_TYPEWRITER_MS,
   BOSS_BONE_COLOR_NORMAL,
   BOSS_BONE_COLOR_BLUE,
   BOSS_BONE_COLOR_ORANGE,
   BOSS_WORD_CHALLENGE_RELIEF,
-  BOSS_WORD_CHALLENGE_FAIL_STRESS,
   BOSS_AUTOPILOT_MS,
   BOSS_ARENA_TOP_ROW_HEIGHT,
   BOSS_ARENA_FOOTER_HEIGHT,
@@ -38,10 +36,17 @@ import {
   BOSS_SHIELD_DURATION_MS,
   BOSS_SHIELD_RING_COLOR,
   BOSS_CHEAT_DECLARE_FREEZE_MS,
+  BOSS_DIALOGUE_AUTO_ADVANCE_MS,
+  BOSS_DIM_OVERLAY_ALPHA,
+  BOSS_DIM_FADE_MS,
+  BOSS_BEAT_BREATHER_MS,
+  BOSS_DODGE_PUSH_DISTANCE,
+  BOSS_BULLET_MAX_AGE_MS,
+  BOSS_BEAT_SAFETY_TIMEOUT_MS,
 } from '../../config/constants';
 
 /* ──────────────────────────────────────────────────────────────────────
- * Типы опасностей ("Hazard") — пули, костяные стены, лучи-бластеры
+ * Типы опасностей ("Hazard")
  * ────────────────────────────────────────────────────────────────────── */
 
 type BulletMovement = 'straight' | 'sine' | 'homing';
@@ -104,7 +109,6 @@ type CheatEffectType = 'dodge-if' | 'invisible-else' | 'loop-for' | 'shield-let'
 interface CheatDefinition {
   keyword: string;
   effect: CheatEffectType;
-  timeLimitMs: number;
   introLines: string[];
   rewardCodeLines: string[];
 }
@@ -112,7 +116,6 @@ interface CheatDefinition {
 const CHEAT_IF: CheatDefinition = {
   keyword: 'if',
   effect: 'dodge-if',
-  timeLimitMs: 4000,
   introLines: [
     'Смотри: если написать условие...',
     '...точка сама поймёт, что опасно, и увернётся!',
@@ -124,19 +127,17 @@ const CHEAT_IF: CheatDefinition = {
 const CHEAT_FOR: CheatDefinition = {
   keyword: 'for',
   effect: 'loop-for',
-  timeLimitMs: 5000,
   introLines: [
     'Теперь цикл: он повторяет действие снова и снова.',
-    'Точка сама пробежит безопасный узор, пока код крутится.',
+    'Точка сама пробежит от опасности несколько раз подряд.',
     'Напечатай "for" — и смотри на повтор.',
   ],
-  rewardCodeLines: ['for (let i = 0; i < 3; i++) {', '  move(pattern[i]);', '}'],
+  rewardCodeLines: ['for (let i = 0; i < 3; i++) {', '  dodgeNearestDanger();', '}'],
 };
 
 const CHEAT_LET: CheatDefinition = {
   keyword: 'let',
   effect: 'shield-let',
-  timeLimitMs: 4000,
   introLines: [
     'А здесь мы объявляем переменную.',
     'Она хранит значение — и защищает тебя, пока существует!',
@@ -148,7 +149,6 @@ const CHEAT_LET: CheatDefinition = {
 const CHEAT_ELSE: CheatDefinition = {
   keyword: 'else',
   effect: 'invisible-else',
-  timeLimitMs: 4500,
   introLines: [
     'А если добавить "иначе"...',
     '...точка на миг станет неосязаемой!',
@@ -158,14 +158,17 @@ const CHEAT_ELSE: CheatDefinition = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────
- * Волны боссфайта
+ * Волны: последовательность "бит" вместо фиксированных таймингов.
+ * Следующий бит стартует только когда зачищены опасности текущего
+ * (или завершён чит-эффект) — триггер это ДЕЙСТВИЕ игрока, а не секундомер.
  * ────────────────────────────────────────────────────────────────────── */
+
+type WaveBeat = { kind: 'hazard'; spawn: () => void } | { kind: 'cheat'; def: CheatDefinition };
 
 interface WaveDefinition {
   title: string;
-  durationMs: number;
   introLines: string[];
-  build: (schedule: (delayMs: number, action: () => void) => void) => void;
+  beats: WaveBeat[];
 }
 
 export class UiMinigameScene extends Phaser.Scene {
@@ -185,14 +188,19 @@ export class UiMinigameScene extends Phaser.Scene {
   private activeTypewriterTimers: Phaser.Time.TimerEvent[] = [];
   private stressLevel = 0;
   private attempts = 0;
+  private currentWaveIndex = 0;
+  private activeBeats: WaveBeat[] = [];
+  private waitingForHazardClear = false;
   private isInvulnerable = false;
   private isCodeChallengeActive = false;
   private isInvisible = false;
   private hasShield = false;
+  private isExiting = false;
   private shieldRing?: Phaser.GameObjects.Arc;
   private activeWordKeyHandler: ((event: KeyboardEvent) => void) | null = null;
 
   // ── UI ──
+  private dimOverlay!: Phaser.GameObjects.Rectangle;
   private dialogueText!: Phaser.GameObjects.Text;
   private continueIndicator!: Phaser.GameObjects.Text;
   private captionText!: Phaser.GameObjects.Text;
@@ -202,94 +210,75 @@ export class UiMinigameScene extends Phaser.Scene {
   private typewriterState: {
     fullText: string;
     timer?: Phaser.Time.TimerEvent;
+    autoAdvanceTimer?: Phaser.Time.TimerEvent;
     isRunning: boolean;
     onComplete?: () => void;
   } = { fullText: '', isRunning: false };
 
-  // ── Диалоговый обработчик, завязан на this через field-arrow ──
-  private handleDialogueAdvance = (): void => {
-    if (this.typewriterState.isRunning) {
-      this.typewriterState.timer?.remove();
-      this.dialogueText.setText(this.typewriterState.fullText);
-      this.typewriterState.isRunning = false;
-      this.continueIndicator.setVisible(true);
-      return;
-    }
-    const callback = this.typewriterState.onComplete;
-    this.typewriterState.onComplete = undefined;
-    this.continueIndicator.setVisible(false);
-    callback?.();
-  };
-
   private readonly WAVES: WaveDefinition[] = [
     {
       title: 'Урок 1: Условие if/else',
-      durationMs: 13000,
       introLines: [
         'Это Мася! Сегодня научу тебя читерить через код.',
         'Смотри на пули и уворачивайся — руками, руками!',
       ],
-      build: (schedule) => {
-        schedule(500, () => this.spawnBullet('straight'));
-        schedule(1800, () => this.spawnBullet('sine'));
-        schedule(3200, () => this.spawnBullet('straight'));
-        schedule(4600, () => this.spawnBullet('homing'));
-        schedule(6200, () => this.showWordChallenge(CHEAT_IF));
-        schedule(9500, () => this.spawnBullet('sine'));
-        schedule(10800, () => this.spawnBullet('straight'));
-      },
+      beats: [
+        { kind: 'hazard', spawn: () => this.spawnBullet('straight') },
+        { kind: 'hazard', spawn: () => this.spawnBullet('sine') },
+        { kind: 'hazard', spawn: () => this.spawnBullet('homing') },
+        { kind: 'cheat', def: CHEAT_IF },
+        { kind: 'hazard', spawn: () => this.spawnBullet('sine') },
+        { kind: 'hazard', spawn: () => this.spawnBullet('straight') },
+      ],
     },
     {
       title: 'Урок 2: Цикл for и синие кости',
-      durationMs: 15000,
       introLines: [
         'Теперь кости! Обычные — просто находи дыру.',
         'А вот синие кости бьют, только если ты ДВИГАЕШЬСЯ. Замри!',
       ],
-      build: (schedule) => {
-        schedule(500, () => this.spawnBoneWallH(-50, 'normal'));
-        schedule(2600, () => this.spawnBoneWallV(-50, 'normal'));
-        schedule(5000, () => this.spawnBoneWallH(-50, 'blue'));
-        schedule(7500, () => this.showWordChallenge(CHEAT_FOR));
-        schedule(11000, () => this.spawnBoneWallH(-50, 'blue'));
-        schedule(13000, () => this.spawnBoneWallV(-50, 'normal'));
-      },
+      beats: [
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('normal') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallV('normal') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('blue') },
+        { kind: 'cheat', def: CHEAT_FOR },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('blue') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallV('normal') },
+      ],
     },
     {
       title: 'Урок 3: Переменная и оранжевые кости',
-      durationMs: 17000,
       introLines: [
         'Оранжевые кости — наоборот: бьют, если ты СТОИШЬ.',
         'Переменная let хранит значение — скоро покажу, как она защищает.',
       ],
-      build: (schedule) => {
-        schedule(500, () => this.spawnBoneWallH(-50, 'orange'));
-        schedule(3000, () => this.spawnBoneWallV(-50, 'orange'));
-        schedule(5500, () => this.showWordChallenge(CHEAT_LET));
-        schedule(9500, () => this.spawnBoneWallH(-50, 'orange'));
-        schedule(12000, () => this.spawnBullet('homing'));
-        schedule(13500, () => this.spawnBoneWallV(-50, 'blue'));
-      },
+      beats: [
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('orange') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallV('orange') },
+        { kind: 'cheat', def: CHEAT_LET },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('orange') },
+        { kind: 'hazard', spawn: () => this.spawnBullet('homing') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallV('blue') },
+      ],
     },
     {
       title: 'Финал: весь код вместе',
-      durationMs: 22000,
       introLines: [
         'А теперь — всё сразу! Как в настоящей программе.',
         'Если запутаешься — вспоминай каждый читкод.',
       ],
-      build: (schedule) => {
-        schedule(300, () => this.spawnBullet('sine'));
-        schedule(1500, () => this.spawnBoneWallH(-50, 'blue'));
-        schedule(3200, () => this.spawnBlaster('horizontal', this.arenaBounds.y + 40));
-        schedule(5200, () => this.showWordChallenge(CHEAT_IF));
-        schedule(8500, () => this.spawnBoneWallV(-50, 'orange'));
-        schedule(10200, () => this.spawnBullet('homing'));
-        schedule(11800, () => this.showWordChallenge(CHEAT_FOR));
-        schedule(15000, () => this.spawnBlaster('vertical', this.arenaBounds.x + 40));
-        schedule(16500, () => this.showWordChallenge(CHEAT_LET));
-        schedule(19500, () => this.showWordChallenge(CHEAT_ELSE));
-      },
+      beats: [
+        { kind: 'hazard', spawn: () => this.spawnBullet('sine') },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallH('blue') },
+        { kind: 'hazard', spawn: () => this.spawnBlaster('horizontal', this.arenaBounds.y + 40) },
+        { kind: 'cheat', def: CHEAT_IF },
+        { kind: 'hazard', spawn: () => this.spawnBoneWallV('orange') },
+        { kind: 'hazard', spawn: () => this.spawnBullet('homing') },
+        { kind: 'cheat', def: CHEAT_FOR },
+        { kind: 'hazard', spawn: () => this.spawnBlaster('vertical', this.arenaBounds.x + 40) },
+        { kind: 'cheat', def: CHEAT_LET },
+        { kind: 'cheat', def: CHEAT_ELSE },
+      ],
     },
   ];
 
@@ -303,10 +292,12 @@ export class UiMinigameScene extends Phaser.Scene {
 
   public create(): void {
     this.resetState();
+    this.buildDimOverlay();
     this.computeLayoutAndBuildArena();
     this.buildTopPanel();
     this.buildFooter();
     this.buildSoul();
+    this.buildExitButton();
     this.setupInput();
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanup, this);
@@ -321,6 +312,12 @@ export class UiMinigameScene extends Phaser.Scene {
     if (this.shieldRing) {
       this.shieldRing.setPosition(this.soul.x, this.soul.y);
     }
+
+    if (this.waitingForHazardClear && this.hazards.length === 0 && !this.isCodeChallengeActive) {
+      this.waitingForHazardClear = false;
+      const event = this.time.delayedCall(BOSS_BEAT_BREATHER_MS, () => this.advanceBeatQueue());
+      this.scheduledEvents.push(event);
+    }
   }
 
   private resetState(): void {
@@ -329,15 +326,45 @@ export class UiMinigameScene extends Phaser.Scene {
     this.activeTypewriterTimers = [];
     this.stressLevel = 0;
     this.attempts = 0;
+    this.currentWaveIndex = 0;
+    this.activeBeats = [];
+    this.waitingForHazardClear = false;
     this.isInvulnerable = false;
     this.isCodeChallengeActive = false;
     this.isInvisible = false;
     this.hasShield = false;
+    this.isExiting = false;
     this.isSoulMovingThisFrame = false;
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Построение сцены: арена, панель диалога, подвал, сердце, ввод
+   * Затемнение фона (плавно при входе, держится весь бой, плавно гаснет при выходе)
+   * ────────────────────────────────────────────────────────────────── */
+
+  private buildDimOverlay(): void {
+    this.dimOverlay = this.add
+      .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, BOSS_DIM_OVERLAY_ALPHA)
+      .setDepth(-10)
+      .setAlpha(0);
+
+    this.tweens.add({ targets: this.dimOverlay, alpha: 1, duration: BOSS_DIM_FADE_MS });
+  }
+
+  private fadeOutAndStop(onComplete: () => void): void {
+    if (this.isExiting) return;
+    this.isExiting = true;
+    this.tweens.add({ targets: this.dimOverlay, alpha: 0, duration: BOSS_DIM_FADE_MS, onComplete });
+  }
+
+  private exitToHub(): void {
+    this.fadeOutAndStop(() => {
+      this.game.events.emit('minigame-exit');
+      this.scene.stop();
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Построение сцены
    * ────────────────────────────────────────────────────────────────── */
 
   private computeLayoutAndBuildArena(): void {
@@ -361,6 +388,7 @@ export class UiMinigameScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xf8fafc);
   }
 
+  /** Во время боя — только окно с фразами, без портрета (портрет остался в MasyaIntroScene). */
   private buildTopPanel(): void {
     const panelX = GAME_WIDTH / 2;
     const panelY = 20 + this.topPanelHalfHeight;
@@ -369,19 +397,8 @@ export class UiMinigameScene extends Phaser.Scene {
       .rectangle(panelX, panelY, BOSS_TOP_PANEL_WIDTH, BOSS_TOP_PANEL_HEIGHT, 0x0f172a, 0.95)
       .setStrokeStyle(2, 0x334155);
 
-    const portraitX = panelX - BOSS_TOP_PANEL_WIDTH / 2 + BOSS_PORTRAIT_SIZE / 2 + 16;
-
-    if (this.textures.exists('npc_max')) {
-      this.add.image(portraitX, panelY, 'npc_max').setDisplaySize(BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE);
-    } else {
-      this.add.rectangle(portraitX, panelY, BOSS_PORTRAIT_SIZE, BOSS_PORTRAIT_SIZE, 0x7c3aed);
-      this.add
-        .text(portraitX, panelY, 'М', { fontSize: '36px', color: '#ffffff', fontStyle: 'bold' })
-        .setOrigin(0.5);
-    }
-
-    const textX = portraitX + BOSS_PORTRAIT_SIZE / 2 + 20;
-    const textWidth = panelX + BOSS_TOP_PANEL_WIDTH / 2 - textX - 24;
+    const textX = panelX - BOSS_TOP_PANEL_WIDTH / 2 + 24;
+    const textWidth = BOSS_TOP_PANEL_WIDTH - 48;
 
     this.dialogueText = this.add
       .text(textX, panelY - 16, '', {
@@ -392,17 +409,19 @@ export class UiMinigameScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
 
     this.continueIndicator = this.add
-      .text(
-        panelX + BOSS_TOP_PANEL_WIDTH / 2 - 24,
-        panelY + BOSS_TOP_PANEL_HEIGHT / 2 - 18,
-        '▼',
-        { fontSize: '14px', color: '#94a3b8' },
-      )
+      .text(panelX + BOSS_TOP_PANEL_WIDTH / 2 - 24, panelY + BOSS_TOP_PANEL_HEIGHT / 2 - 18, '▼', {
+        fontSize: '14px',
+        color: '#94a3b8',
+      })
       .setOrigin(0.5)
       .setVisible(false);
 
     panelBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.handleDialogueAdvance());
-    this.input.keyboard!.on('keydown-SPACE', () => this.handleDialogueAdvance());
+    // buildTopPanel():
+    this.input.keyboard!.on('keydown-SPACE', (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      this.handleDialogueAdvance();
+    });
   }
 
   private buildFooter(): void {
@@ -438,16 +457,37 @@ export class UiMinigameScene extends Phaser.Scene {
       .setDepth(100);
   }
 
+  /** Кнопка выхода доступна в любой момент боя, независимо от состояния. */
+  private buildExitButton(): void {
+    const button = this.add
+      .text(GAME_WIDTH - 20, 20, '✖ Выйти (Esc)', {
+        fontSize: '13px',
+        color: '#f8fafc',
+        backgroundColor: '#1f293799',
+        padding: { x: 8, y: 4 },
+      })
+      .setOrigin(1, 0)
+      .setDepth(500)
+      .setInteractive({ useHandCursor: true });
+
+    button.on('pointerdown', () => this.exitToHub());
+  }
+
   private setupInput(): void {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasdKeys = this.input.keyboard!.addKeys('W,S,A,D') as Record<
       'W' | 'A' | 'S' | 'D',
       Phaser.Input.Keyboard.Key
     >;
+    this.input.keyboard!.on('keydown-ESC', (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      this.exitToHub();
+    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Диалоговая печать (typewriter)
+   * Диалоговая печать: скип анимации по первому пробелу, переход по второму,
+   * авто-переход через BOSS_DIALOGUE_AUTO_ADVANCE_MS, если игрок не нажимал сам.
    * ────────────────────────────────────────────────────────────────── */
 
   private runTypewriter(text: string, onComplete: () => void): void {
@@ -455,6 +495,7 @@ export class UiMinigameScene extends Phaser.Scene {
     this.typewriterState.fullText = text;
     this.typewriterState.isRunning = true;
     this.typewriterState.onComplete = onComplete;
+    this.typewriterState.autoAdvanceTimer?.remove();
     this.continueIndicator.setVisible(false);
 
     let charIndex = 0;
@@ -468,12 +509,40 @@ export class UiMinigameScene extends Phaser.Scene {
           timer.remove();
           this.typewriterState.isRunning = false;
           this.continueIndicator.setVisible(true);
+          this.scheduleAutoAdvance();
         }
       },
     });
 
     this.typewriterState.timer = timer;
     this.activeTypewriterTimers.push(timer);
+  }
+
+  private scheduleAutoAdvance(): void {
+    this.typewriterState.autoAdvanceTimer?.remove();
+    const timer = this.time.delayedCall(BOSS_DIALOGUE_AUTO_ADVANCE_MS, () => this.advanceDialogue());
+    this.typewriterState.autoAdvanceTimer = timer;
+    this.activeTypewriterTimers.push(timer);
+  }
+
+  private handleDialogueAdvance(): void {
+    if (this.typewriterState.isRunning) {
+      this.typewriterState.timer?.remove();
+      this.dialogueText.setText(this.typewriterState.fullText);
+      this.typewriterState.isRunning = false;
+      this.continueIndicator.setVisible(true);
+      this.scheduleAutoAdvance();
+      return;
+    }
+    this.advanceDialogue();
+  }
+
+  private advanceDialogue(): void {
+    this.typewriterState.autoAdvanceTimer?.remove();
+    const callback = this.typewriterState.onComplete;
+    this.typewriterState.onComplete = undefined;
+    this.continueIndicator.setVisible(false);
+    callback?.();
   }
 
   private runDialogueSequence(lines: string[], onDone: () => void): void {
@@ -491,7 +560,7 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Волны
+   * Волны и очередь "бит" — прогресс идёт по действиям игрока
    * ────────────────────────────────────────────────────────────────── */
 
   private startWave(index: number): void {
@@ -500,36 +569,50 @@ export class UiMinigameScene extends Phaser.Scene {
       return;
     }
 
+    this.currentWaveIndex = index;
     const wave = this.WAVES[index];
     this.clearHazards();
     this.applyStressChange(-BOSS_WAVE_BREATHER_RELIEF);
+    this.activeBeats = [...wave.beats];
 
-    this.runDialogueSequence([wave.title, ...wave.introLines], () => {
-      const schedule = (delayMs: number, action: () => void): void => {
-        const event = this.time.delayedCall(delayMs, action);
-        this.scheduledEvents.push(event);
-      };
-
-      wave.build(schedule);
-
-      const waveEndEvent = this.time.delayedCall(wave.durationMs, () => this.tryAdvanceWave(index + 1));
-      this.scheduledEvents.push(waveEndEvent);
-    });
+    this.runDialogueSequence([wave.title, ...wave.introLines], () => this.advanceBeatQueue());
   }
 
-  /** Не переходим к следующей волне, пока открыт чит-челлендж / идёт автопилот. */
-  private tryAdvanceWave(nextIndex: number): void {
-    if (this.isCodeChallengeActive) {
-      const pollEvent = this.time.delayedCall(300, () => this.tryAdvanceWave(nextIndex));
-      this.scheduledEvents.push(pollEvent);
-      return;
+    private advanceBeatQueue(): void {
+      if (this.activeBeats.length === 0) {
+        this.startWave(this.currentWaveIndex + 1);
+        return;
+      }
+
+      const beat = this.activeBeats.shift()!;
+      if (beat.kind === 'hazard') {
+        beat.spawn();
+        this.waitingForHazardClear = true;
+
+    // Страховка: если хазард почему-то не зачистился сам за 9 сек —
+    // не даём бою зависнуть навечно, принудительно очищаем и идём дальше.
+        const safetyEvent = this.time.delayedCall(BOSS_BEAT_SAFETY_TIMEOUT_MS, () => {
+          if (this.waitingForHazardClear) {
+            this.clearHazards();
+            this.advanceBeatQueue();
+          }
+        });
+        this.scheduledEvents.push(safetyEvent);
+      } else {
+        this.showWordChallenge(beat.def);
+      }
     }
-    this.startWave(nextIndex);
+
+  /** Вызывается самим эффектом чита, когда он закончился (см. ниже). */
+  private finishBeatAndContinue(): void {
+    const event = this.time.delayedCall(BOSS_BEAT_BREATHER_MS, () => this.advanceBeatQueue());
+    this.scheduledEvents.push(event);
   }
 
   private clearHazards(): void {
     this.scheduledEvents.forEach((event) => event.remove(false));
     this.scheduledEvents = [];
+    this.waitingForHazardClear = false;
     this.hazards.forEach((hazard) => this.destroyHazardObjects(hazard));
     this.hazards = [];
   }
@@ -546,7 +629,7 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Механика "Напечатай слово"
+   * Механика "Напечатай слово" — без таймера, ждёт корректного ввода
    * ────────────────────────────────────────────────────────────────── */
 
   private showWordChallenge(def: CheatDefinition): void {
@@ -558,16 +641,14 @@ export class UiMinigameScene extends Phaser.Scene {
     const word = def.keyword;
     let typedCount = 0;
 
-    const windowWidth = 260;
+    const windowWidth = 240;
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
 
     const container = this.add.container(centerX, centerY).setDepth(200);
-    const bg = this.add
-      .rectangle(0, 0, windowWidth, 110, 0x111827, 0.92)
-      .setStrokeStyle(2, 0x60a5fa);
+    const bg = this.add.rectangle(0, 0, windowWidth, 90, 0x111827, 0.92).setStrokeStyle(2, 0x60a5fa);
     const prompt = this.add
-      .text(0, -28, 'Напечатай:', { fontSize: '14px', color: '#94a3b8' })
+      .text(0, -22, 'Напечатай:', { fontSize: '14px', color: '#94a3b8' })
       .setOrigin(0.5);
 
     const letterTexts: Phaser.GameObjects.Text[] = [];
@@ -575,7 +656,7 @@ export class UiMinigameScene extends Phaser.Scene {
     const startX = -((word.length - 1) * letterSpacing) / 2;
     for (let i = 0; i < word.length; i += 1) {
       const letterText = this.add
-        .text(startX + i * letterSpacing, 0, word[i], {
+        .text(startX + i * letterSpacing, 8, word[i], {
           fontSize: '26px',
           fontStyle: 'bold',
           color: '#64748b',
@@ -584,15 +665,7 @@ export class UiMinigameScene extends Phaser.Scene {
       letterTexts.push(letterText);
     }
 
-    const timerBarWidth = windowWidth - 30;
-    const timerBarBg = this.add
-      .rectangle(0, 32, timerBarWidth, 8, 0x1f2937)
-      .setStrokeStyle(1, 0x334155);
-    const timerBarFill = this.add
-      .rectangle(-timerBarWidth / 2, 32, timerBarWidth, 8, 0x60a5fa)
-      .setOrigin(0, 0.5);
-
-    container.add([bg, prompt, ...letterTexts, timerBarBg, timerBarFill]);
+    container.add([bg, prompt, ...letterTexts]);
     container.setScale(0.3).setAlpha(0);
     this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 220, ease: 'Back.easeOut' });
 
@@ -601,7 +674,6 @@ export class UiMinigameScene extends Phaser.Scene {
         window.removeEventListener('keydown', this.activeWordKeyHandler);
         this.activeWordKeyHandler = null;
       }
-      timerTween.stop();
       container.destroy();
     };
 
@@ -620,21 +692,10 @@ export class UiMinigameScene extends Phaser.Scene {
 
     this.activeWordKeyHandler = onKeyDown;
     window.addEventListener('keydown', onKeyDown);
-
-    const timerTween = this.tweens.add({
-      targets: timerBarFill,
-      scaleX: 0,
-      duration: def.timeLimitMs,
-      onComplete: () => {
-        cleanupChallenge();
-        this.applyStressChange(BOSS_WORD_CHALLENGE_FAIL_STRESS);
-        this.isCodeChallengeActive = false;
-      },
-    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Диспетчер эффектов чита + печать кода-награды
+   * Диспетчер эффектов чита
    * ────────────────────────────────────────────────────────────────── */
 
   private printRewardCode(lines: string[]): void {
@@ -683,9 +744,9 @@ export class UiMinigameScene extends Phaser.Scene {
     }
   }
 
-  /** if — одиночный уворот: точка сама уезжает в безопасную точку, бой заморожен. */
+  /** if — точка сама считает, от какой угрозы ближе всего, и уходит от неё. */
   private playDodgeIfEffect(): void {
-    const target = this.findSafeDodgeTarget();
+    const target = this.computeDodgeTarget();
     this.tweens.add({
       targets: this.soul,
       x: target.x,
@@ -694,11 +755,12 @@ export class UiMinigameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
       onComplete: () => {
         this.isCodeChallengeActive = false;
+        this.finishBeatAndContinue();
       },
     });
   }
 
-  /** else — временная неосязаемость, управление возвращается сразу, бой НЕ заморожен. */
+  /** else — временная неосязаемость, управление возвращается сразу, бой не заморожен. */
   private playInvisibleElseEffect(): void {
     this.isInvisible = true;
     this.isCodeChallengeActive = false;
@@ -717,25 +779,28 @@ export class UiMinigameScene extends Phaser.Scene {
       this.soul.setAlpha(1).setFillStyle(0xef4444, 1);
       this.isInvisible = false;
     });
+
+    this.finishBeatAndContinue();
   }
 
-  /** for — несколько последовательных рывков, видно, что это цикл. */
+  /** for — несколько последовательных уворотов, каждый пересчитывает ближайшую угрозу заново. */
   private playLoopForEffect(): void {
-    const path = [this.findSafeDodgeTarget(), this.findSafeDodgeTarget(), this.findSafeDodgeTarget()];
-    const stepDuration = BOSS_LOOP_PATTERN_DURATION_MS / path.length;
+    const totalSteps = 3;
+    const stepDuration = BOSS_LOOP_PATTERN_DURATION_MS / totalSteps;
     let step = 0;
 
     const runStep = (): void => {
-      if (step >= path.length) {
+      if (step >= totalSteps) {
         this.isCodeChallengeActive = false;
+        this.finishBeatAndContinue();
         return;
       }
-      const point = path[step];
       step += 1;
+      const target = this.computeDodgeTarget();
       this.tweens.add({
         targets: this.soul,
-        x: point.x,
-        y: point.y,
+        x: target.x,
+        y: target.y,
         duration: stepDuration,
         ease: 'Sine.easeInOut',
         onComplete: runStep,
@@ -745,7 +810,7 @@ export class UiMinigameScene extends Phaser.Scene {
     runStep();
   }
 
-  /** let — щит на один удар, управление возвращается почти сразу, бой НЕ заморожен. */
+  /** let — щит на один удар, управление возвращается почти сразу, бой не заморожен. */
   private playShieldLetEffect(): void {
     this.hasShield = true;
 
@@ -761,6 +826,7 @@ export class UiMinigameScene extends Phaser.Scene {
 
     this.time.delayedCall(BOSS_CHEAT_DECLARE_FREEZE_MS, () => {
       this.isCodeChallengeActive = false;
+      this.finishBeatAndContinue();
     });
 
     this.time.delayedCall(BOSS_SHIELD_DURATION_MS, () => {
@@ -784,10 +850,72 @@ export class UiMinigameScene extends Phaser.Scene {
   }
 
   /* ──────────────────────────────────────────────────────────────────
-   * Поиск безопасной точки (для dodge-if / loop-for)
+   * "Осознанность" точки: находим ближайшую угрозу и вектор ухода от неё
    * ────────────────────────────────────────────────────────────────── */
 
-  private findSafeDodgeTarget(): { x: number; y: number } {
+  private getHazardClosestPoint(hazard: Hazard): { x: number; y: number } {
+    const bounds = this.arenaBounds;
+    if (hazard.kind === 'bullet') {
+      return { x: hazard.obj.x, y: hazard.obj.y };
+    }
+    if (hazard.kind === 'bone-wall-h') {
+      return { x: Phaser.Math.Clamp(this.soul.x, bounds.x, bounds.x + bounds.width), y: hazard.y };
+    }
+    if (hazard.kind === 'bone-wall-v') {
+      return { x: hazard.x, y: Phaser.Math.Clamp(this.soul.y, bounds.y, bounds.y + bounds.height) };
+    }
+    return hazard.orientation === 'horizontal'
+      ? { x: this.soul.x, y: hazard.position }
+      : { x: hazard.position, y: this.soul.y };
+  }
+
+  private findNearestThreatPoint(): { x: number; y: number } | null {
+    let nearest: { x: number; y: number } | null = null;
+    let nearestDistance = Infinity;
+
+    for (const hazard of this.hazards) {
+      const point = this.getHazardClosestPoint(hazard);
+      const distance = Phaser.Math.Distance.Between(this.soul.x, this.soul.y, point.x, point.y);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = point;
+      }
+    }
+
+    return nearest;
+  }
+
+  /** Главный метод "осознанности": точка знает, от чего именно уворачивается. */
+  private computeDodgeTarget(): { x: number; y: number } {
+    const bounds = this.arenaBounds;
+    const threat = this.findNearestThreatPoint();
+
+    if (!threat) {
+      return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    }
+
+    const dx = this.soul.x - threat.x;
+    const dy = this.soul.y - threat.y;
+    const len = Math.hypot(dx, dy) || 1;
+
+    const candidate = {
+      x: Phaser.Math.Clamp(
+        this.soul.x + (dx / len) * BOSS_DODGE_PUSH_DISTANCE,
+        bounds.x + BOSS_SOUL_RADIUS,
+        bounds.x + bounds.width - BOSS_SOUL_RADIUS,
+      ),
+      y: Phaser.Math.Clamp(
+        this.soul.y + (dy / len) * BOSS_DODGE_PUSH_DISTANCE,
+        bounds.y + BOSS_SOUL_RADIUS,
+        bounds.y + bounds.height - BOSS_SOUL_RADIUS,
+      ),
+    };
+
+    return this.isPointSafe(candidate.x, candidate.y) ? candidate : this.findRandomSafeTarget();
+  }
+
+  /** Резервный поиск — только если "уход от угрозы" всё равно оказался небезопасен. */
+  private findRandomSafeTarget(): { x: number; y: number } {
     const inset = BOSS_SOUL_RADIUS + 10;
     const bounds = this.arenaBounds;
     let fallback = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
@@ -797,9 +925,7 @@ export class UiMinigameScene extends Phaser.Scene {
         x: Phaser.Math.Between(bounds.x + inset, bounds.x + bounds.width - inset),
         y: Phaser.Math.Between(bounds.y + inset, bounds.y + bounds.height - inset),
       };
-      if (this.isPointSafe(candidate.x, candidate.y)) {
-        return candidate;
-      }
+      if (this.isPointSafe(candidate.x, candidate.y)) return candidate;
       fallback = candidate;
     }
     return fallback;
@@ -921,7 +1047,7 @@ export class UiMinigameScene extends Phaser.Scene {
    * ────────────────────────────────────────────────────────────────── */
 
   private updateHazards(delta: number): void {
-    if (this.isCodeChallengeActive) return; // бой заморожен во время чит-эффекта
+    if (this.isCodeChallengeActive) return;
 
     const dt = delta / 1000;
     const remaining: Hazard[] = [];
@@ -946,6 +1072,10 @@ export class UiMinigameScene extends Phaser.Scene {
   private updateBullet(hazard: BulletHazard, dt: number): boolean {
     hazard.age += dt;
 
+    if (hazard.age >= BOSS_BULLET_MAX_AGE_MS / 1000) {
+      hazard.obj.destroy();
+      return false;
+    }
     if (hazard.movement === 'sine') {
       const perpX = -hazard.baseVy;
       const perpY = hazard.baseVx;
@@ -1135,7 +1265,7 @@ export class UiMinigameScene extends Phaser.Scene {
     return BOSS_BONE_COLOR_NORMAL;
   }
 
-  private spawnBoneWallH(startOffset: number, colorMode: BoneColorMode): void {
+  private spawnBoneWallH(colorMode: BoneColorMode): void {
     const bounds = this.arenaBounds;
     const gapSize = BOSS_BONE_GAP_SIZE;
     const gapCenterX = Phaser.Math.Between(bounds.x + gapSize, bounds.x + bounds.width - gapSize);
@@ -1143,8 +1273,11 @@ export class UiMinigameScene extends Phaser.Scene {
 
     const hazard: BoneWallHHazard = {
       kind: 'bone-wall-h',
-      rects: [this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color), this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color)],
-      y: bounds.y + startOffset,
+      rects: [
+        this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color),
+        this.add.rectangle(0, 0, 0, BOSS_BONE_THICKNESS, color),
+      ],
+      y: bounds.y - 50,
       gapCenterX,
       gapSize,
       speed: BOSS_BONE_SPEED,
@@ -1155,7 +1288,7 @@ export class UiMinigameScene extends Phaser.Scene {
     this.hazards.push(hazard);
   }
 
-  private spawnBoneWallV(startOffset: number, colorMode: BoneColorMode): void {
+  private spawnBoneWallV(colorMode: BoneColorMode): void {
     const bounds = this.arenaBounds;
     const gapSize = BOSS_BONE_GAP_SIZE;
     const gapCenterY = Phaser.Math.Between(bounds.y + gapSize, bounds.y + bounds.height - gapSize);
@@ -1163,8 +1296,11 @@ export class UiMinigameScene extends Phaser.Scene {
 
     const hazard: BoneWallVHazard = {
       kind: 'bone-wall-v',
-      rects: [this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color), this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color)],
-      x: bounds.x + startOffset,
+      rects: [
+        this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color),
+        this.add.rectangle(0, 0, BOSS_BONE_THICKNESS, 0, color),
+      ],
+      x: bounds.x - 50,
       gapCenterY,
       gapSize,
       speed: BOSS_BONE_SPEED,
@@ -1272,14 +1408,16 @@ export class UiMinigameScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
 
     finishButton.on('pointerdown', () => {
-      this.game.events.emit('minigame-complete', {
-        minigameType: 'builder',
-        score,
-        attempts: this.attempts,
-        stressLevel: this.stressLevel,
-        difficulty: 'hard',
+      this.fadeOutAndStop(() => {
+        this.game.events.emit('minigame-complete', {
+          minigameType: 'builder',
+          score,
+          attempts: this.attempts,
+          stressLevel: this.stressLevel,
+          difficulty: 'hard',
+        });
+        this.scene.stop();
       });
-      this.scene.stop();
     });
   }
 
@@ -1298,11 +1436,6 @@ export class UiMinigameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(301);
 
-    const exitToHub = (): void => {
-      this.game.events.emit('minigame-exit');
-      this.scene.stop();
-    };
-
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, '← Сдаться', {
         fontSize: '16px',
@@ -1313,7 +1446,7 @@ export class UiMinigameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(301)
       .setInteractive({ useHandCursor: true })
-      .on('pointerdown', exitToHub);
+      .on('pointerdown', () => this.exitToHub());
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70, 'В меню', {
@@ -1325,7 +1458,7 @@ export class UiMinigameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(301)
       .setInteractive({ useHandCursor: true })
-      .on('pointerdown', exitToHub);
+      .on('pointerdown', () => this.exitToHub());
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -1349,5 +1482,6 @@ export class UiMinigameScene extends Phaser.Scene {
     this.isInvisible = false;
     this.hasShield = false;
     this.input.keyboard?.removeAllListeners('keydown-SPACE');
+    this.input.keyboard?.removeAllListeners('keydown-ESC');
   }
 }
